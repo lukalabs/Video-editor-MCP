@@ -17,6 +17,7 @@ import { createSignal, tween, useScene, waitFor } from "@motion-canvas/core";
 
 import {
   COLUMN_W,
+  applyShadowScale,
   buildBubbleNode,
   entranceTransform,
 } from "../lib/balloon-bubble";
@@ -50,6 +51,10 @@ export default makeScene2D(function* (view) {
     (frame.x * FIT_MARGIN) / COLUMN_W,
     (frame.y * FIT_MARGIN) / bubble.height,
   );
+
+  // Canvas shadows are not transformed by the node's scale, so they are rescaled for the
+  // zoom here rather than at build time. See applyShadowScale.
+  applyShadowScale(bubble, zoom);
 
   /** Seconds into the clip. Every property below reads this. */
   const now = createSignal(0);

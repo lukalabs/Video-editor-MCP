@@ -3238,3 +3238,61 @@ and scaled to 0.94. The instrument was wrong, not the render.
 `tsc --noEmit` is not a usable gate in this package: the `?scene` / `?project` virtual modules
 and the JSX runtime produce the same errors for the three pre-existing scenes. The new files add
 no new error categories.
+
+### Stage 23a — closing the unmeasured entrance claims
+
+Stage 23's verification covered geometry, the curve, colour and timing, and asserted the
+entrance's transform-origin, scale, translateY and opacity as implemented. Three of those were
+read off the source rather than measured. A hypothesis that the corner anchoring was wrong —
+that the port interpolated the scale as a number without repositioning the node, so the bubble
+grew from its centre instead of its corner — forced them to be measured properly. Result: the
+hypothesis was **falsified**, and a different defect in the same family turned up.
+
+**Anchoring is correct.** `entranceTransform` already computes the compensating translation
+(`corner * (1 - scale)`), which is the identity that turns Motion Canvas's origin-anchored
+scale into CSS's corner-anchored one. Measured per-edge at 60fps across the entrance, because
+`transform-origin: 0% 100%` pins the left and bottom edges while translateY still slides the
+bottom on a known schedule:
+
+| | received | sent |
+|---|---|---|
+| anchored edge | left, drift **0px** | right, drift **0px** |
+| free edge | right, travels 30px | left, travels 29px |
+| bottom vs predicted `10*(1-eased)` | worst error 0.8px | worst error 0.8px |
+
+The free edge travelling 30 rather than the naive 41px is the first *visible* frame: frame 0
+has opacity 0, so measurement starts at eased 0.286 (scale 0.9572), giving 0.0428 x 192 x 3.6
+= 29.6px.
+
+**Opacity is correct, and the test could tell the difference.** The source uses the same eased
+value for the fade as for the transform, not a separate linear ramp. Measured peak alpha
+against both hypotheses: worst error **0.0017** vs the eased curve (which is 8-bit
+quantisation) and **0.543** vs a linear fade — 310x apart, so the measurement is decisive
+rather than merely consistent.
+
+**The real defect: canvas shadows do not scale with the node.** `shadowBlur` and `shadowOffset`
+are applied in the canvas's coordinate space and are NOT transformed by the CTM, unlike CSS
+`filter: drop-shadow()`, which scales with the element. These bubbles are built at scale 1 and
+the whole node is zoomed 3.6x to fill the frame, so the shadow stayed at design size:
+
+    before: reach 21px below the bubble   (device-space, 3.6x too tight)
+    after:  reach 77px                    (CSS-equivalent ~86px; the rest is the Gaussian tail)
+
+A shadow 3.6x too tight reads as flatter and harder-edged than the original — the kind of
+mismatch that looks slightly wrong without anything looking broken. `applyShadowScale` fixes it,
+called from each scene once the zoom is known (it depends on the bubbles' measured heights, so
+it cannot be known at build time).
+
+Residual, accepted: during the 240ms entrance the node also scales 0.94 -> 1.0 and CSS would
+scale the shadow with that too. That is a 6% error on the shadow for 240ms; correcting it means
+writing the shadow every frame, which is not worth it.
+
+Re-verified after the fix: anchoring unchanged, fills still exactly `#ffffff`/`#242433` and
+`#00004d`/`#ffffff`, thread gaps still 6.13/11.82/6.13 against 6/12/6, typing windows still
+frames 20-62 and 95-137.
+
+**The lesson, which is the reason this entry exists:** three properties were reported as
+verified in the same table as things that had actually been measured. Two turned out right and
+one turned out wrong, and no reader of that table could have told which was which. A claim read
+off the source is a different kind of claim from one read off pixels, and mixing them in one
+list of checkmarks is what let a 3.6x shadow error sit under a "verified" heading.

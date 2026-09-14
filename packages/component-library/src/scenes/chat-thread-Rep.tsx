@@ -15,6 +15,7 @@ import { createSignal, tween, useScene } from "@motion-canvas/core";
 
 import {
   COLUMN_W,
+  applyShadowScale,
   buildBubbleNode,
   buildTypingNode,
   entranceTransform,
@@ -142,6 +143,11 @@ export default makeScene2D(function* (view) {
   const frame = view.size();
   const zoom = Math.min((frame.x * FIT_MARGIN) / COLUMN_W, (frame.y * FIT_MARGIN) / tallest);
   const column = (<Node scale={zoom} />) as unknown as Node;
+
+  // Canvas shadows are not transformed by the node's scale, so every bubble's shadow is
+  // rescaled for the zoom here rather than at build time. See applyShadowScale.
+  for (const bubble of bubbles) applyShadowScale(bubble, zoom);
+  applyShadowScale(typing, zoom);
 
   bubbles.forEach((bubble, i) => {
     const item = timeline.items[i];

@@ -52,6 +52,33 @@ export interface BuiltBubble {
   node: Node;
   width: number;
   height: number;
+  /** The silhouette itself, so the shadow can be rescaled once the node zoom is known. */
+  shadow: Path;
+  /** The fontSize scale this bubble was built at. */
+  scale: number;
+}
+
+/**
+ * Rescales the drop shadow for the zoom the bubble is rendered at.
+ *
+ * Canvas `shadowBlur` and `shadowOffset` are applied in the canvas's own coordinate space and
+ * are NOT transformed by the current transform matrix — unlike CSS `filter: drop-shadow()`,
+ * which scales with the element. Since these bubbles are built at scale 1 and the whole node
+ * is then zoomed to fill the frame, the shadow would otherwise stay at its design size: at
+ * zoom 3.6 it measured 21px of reach where CSS gives ~86px, reading flatter and harder-edged
+ * than the original without anything looking obviously wrong.
+ *
+ * Called after the zoom is computed, because the zoom depends on the bubbles' measured
+ * heights and so cannot be known while they are being built.
+ *
+ * The residual: during the 240ms entrance the node also scales 0.94 -> 1.0, and CSS would
+ * scale the shadow with that too. That is a 6% error for 240ms; correcting it would mean
+ * writing the shadow every frame, which is not worth it. See NOTES.md Stage 23.
+ */
+export function applyShadowScale(built: BuiltBubble, zoom: number): void {
+  const factor = built.scale * zoom;
+  built.shadow.shadowBlur(SHADOW.blur * factor);
+  built.shadow.shadowOffset([SHADOW.offset[0] * factor, SHADOW.offset[1] * factor]);
 }
 
 export interface BubbleOptions {
@@ -100,7 +127,7 @@ function centredPathData(w: number, h: number, scale: number): string {
 }
 
 /** The silhouette, drawn behind content of the given size. */
-function silhouette(w: number, h: number, fill: string, scale: number): Node {
+function silhouette(w: number, h: number, fill: string, scale: number): Path {
   return (
     <Path
       data={centredPathData(w, h, scale)}
@@ -109,7 +136,7 @@ function silhouette(w: number, h: number, fill: string, scale: number): Node {
       shadowBlur={SHADOW.blur * scale}
       shadowOffset={[SHADOW.offset[0] * scale, SHADOW.offset[1] * scale]}
     />
-  ) as unknown as Node;
+  ) as unknown as Path;
 }
 
 /**
@@ -139,7 +166,8 @@ export function buildBubbleNode(
   const palette = PALETTE[from];
 
   const node = new Node({});
-  node.add(silhouette(w, h, palette.fill, scale));
+  const shadow = silhouette(w, h, palette.fill, scale);
+  node.add(shadow);
 
   measured.lines.forEach((line, i) => {
     node.add(
@@ -163,7 +191,7 @@ export function buildBubbleNode(
     );
   });
 
-  return { node, width: w, height: h };
+  return { node, width: w, height: h, shadow, scale };
 }
 
 /**
@@ -188,7 +216,8 @@ export function buildTypingNode(
   const h = rowHeight + 2 * padY;
 
   const node = new Node({});
-  node.add(silhouette(w, h, PALETTE.received.fill, scale));
+  const shadow = silhouette(w, h, PALETTE.received.fill, scale);
+  node.add(shadow);
 
   const dots: Node[] = [];
   for (let i = 0; i < 3; i += 1) {
@@ -204,7 +233,7 @@ export function buildTypingNode(
     node.add(dot);
   }
 
-  return { node, width: w, height: h, dots };
+  return { node, width: w, height: h, shadow, scale, dots };
 }
 
 /** Applies the dot pulse for time `t`. Kept next to the builder so the two cannot drift. */
