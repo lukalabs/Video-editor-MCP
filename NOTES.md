@@ -3296,3 +3296,77 @@ verified in the same table as things that had actually been measured. Two turned
 one turned out wrong, and no reader of that table could have told which was which. A claim read
 off the source is a different kind of claim from one read off pixels, and mixing them in one
 list of checkmarks is what let a 3.6x shadow error sit under a "verified" heading.
+
+## Stage 24 — multi-line text params
+
+Two components carry several items in one text param: orbit-headline-Rep's phrases (joined
+with "|") and chat-thread-Rep's messages (newline, with `received:` / `sent:` prefixes). The
+param vocabulary has no array type and is not gaining one — an agent still sends a single
+delimited string — but a person editing by hand should not have to remember the delimiter.
+
+### Schema
+
+Three optional fields on a text param, passed through untouched because the API returns
+meta.json verbatim (`components.js` validates prop *values*, never the param shape):
+
+    "multiline": true,
+    "lineSeparator": "|",
+    "lineHint": "One phrase per line. ..."
+
+Applied to exactly two params. `stat-counter`'s `label` and `chat-bubble-single-Rep`'s `text`
+are genuinely single-line and were left alone.
+
+`chat-thread-Rep`'s separator is `"\n"` rather than `"|"`, even though its parser accepts
+both: newline is what a person types, and it round-trips through the textarea unchanged.
+
+### A textarea, not a list of line inputs
+
+The decision that mattered was where the canonical value lives. The panel already keeps
+`values[param.key]` as one joined string and restores it straight from a clip's stored props
+on re-open. So the textarea renders `value.split(separator).join("\n")` and joins back on
+change, and **nothing else had to change** — the submit paths, the re-render flow and the
+"split it back for editing" requirement all fall out of that one substitution.
+
+A dynamic add/remove list would have needed a `lines[]` state per param kept in sync with the
+string, which is a second source of truth and a new way to desync. It is also worse for the
+actual use: people paste multi-line chat text.
+
+### MCP-facing consistency
+
+Each param's `description` — the prose MCP surfaces — now states the delimiter rule in the
+same terms as the `lineHint`, so the friendly UI wording and the API documentation cannot
+drift apart. The `lineSeparator` field gives an agent the same answer as data.
+
+While verifying, the `list_components` **tool description** turned out to be stale in the
+other direction: it named "a stat counter, a 9:16 turbulent background, an orbit headline"
+and had never learnt about the two chat components. Stage 19's guard test catches quoted ids
+that do NOT exist; it cannot catch components that exist and are not mentioned. Fixed
+structurally rather than by adding the two names — the description no longer enumerates
+components at all, so it cannot go stale again.
+
+### Verification
+
+All five, against the running stack in a real browser.
+
+| | result |
+|---|---|
+| 1. orbit-headline-Rep | textarea; default shows as two lines; typing three lines sent `"First phrase\|Second phrase\|Third phrase"` |
+| 2. chat-thread-Rep | textarea; hint names the prefixes; a sender-prefixed thread sent newline-joined, byte for byte |
+| 3. re-open an existing clip | generated, added to a track, selected: the stored string came back as three editable lines |
+| 4. stat-counter's `label` | still `<input type=text>`, no hint |
+| 5. MCP round-trip | `list_components` carries both descriptions in prose, plus the three new schema fields |
+
+Verifications 1 and 2 assert the **outgoing request body**, not the field's state: that payload
+is the contract between the field and the renderer, so reading it settles whether the join is
+right. Suites: mcp-server 15/15, render-service 26/26, web typecheck clean.
+
+Two things the harness got wrong before the app did, both worth recording because the next UI
+test will hit them:
+
+- **Request interception slows every load through CDP.** A fixed 5.8s wait that was ample
+  without it fired before the panel had rendered, and the run reported "the panel does not
+  open" when it opened fine. Wait for the control, never for a duration.
+- **The Component Library is a tab inside the assets panel**, not a rail icon, and generated
+  media carries its component in a module registry keyed by media id — the clip is only
+  stamped with `componentId`/`props` once it reaches a track. Two probes were written against
+  guesses at both before checking the DOM and the source.

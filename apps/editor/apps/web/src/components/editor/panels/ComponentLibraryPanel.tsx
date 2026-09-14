@@ -56,6 +56,43 @@ interface ComponentParam {
   min?: number;
   max?: number;
   step?: number;
+  /**
+   * A text param that carries several lines in one delimited string — orbit-headline-Rep's
+   * phrases, chat-thread-Rep's messages. The prop sent to the renderer is still that single
+   * string; this only says the field should be edited as lines rather than making someone
+   * type the delimiter by hand.
+   */
+  multiline?: boolean;
+  /** What the lines are joined with. Defaults to a newline. */
+  lineSeparator?: string;
+  /** Shown under the field, so the convention does not have to be memorised. */
+  lineHint?: string;
+}
+
+/**
+ * The stored value is always the joined string — the same thing the API receives and the
+ * same thing a reopened clip's props contain. These two only change how it is displayed, so
+ * there is no second copy of the text to keep in sync.
+ */
+function linesToDisplay(value: string, separator: string): string {
+  if (separator === "\n") return value;
+  return value
+    .split(separator)
+    .map((line) => line.trim())
+    .join("\n");
+}
+
+function separatorFor(param: ComponentParam): string {
+  return param.lineSeparator ?? "\n";
+}
+
+function displayToValue(display: string, separator: string): string {
+  if (separator === "\n") return display;
+  return display
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0)
+    .join(separator);
 }
 
 interface ComponentMeta {
@@ -440,7 +477,28 @@ export const ComponentLibraryPanel: React.FC = () => {
                     {label}
                   </label>
 
-                  {param.type === "text" || param.type === "media" ? (
+                  {param.type === "text" && param.multiline ? (
+                    <>
+                      <textarea
+                        id={inputId}
+                        rows={Math.min(
+                          8,
+                          Math.max(3, String(value ?? "").split(separatorFor(param)).length + 1),
+                        )}
+                        value={linesToDisplay(String(value ?? ""), separatorFor(param))}
+                        onChange={(event) =>
+                          setValue(
+                            param.key,
+                            displayToValue(event.target.value, separatorFor(param)),
+                          )
+                        }
+                        className="resize-y rounded-md border border-border/70 bg-bg-2 px-2 py-1.5 font-mono text-[12px] leading-5 text-fg"
+                      />
+                      {param.lineHint ? (
+                        <p className="text-[11px] leading-4 text-fg-muted">{param.lineHint}</p>
+                      ) : null}
+                    </>
+                  ) : param.type === "text" || param.type === "media" ? (
                     <input
                       id={inputId}
                       type="text"

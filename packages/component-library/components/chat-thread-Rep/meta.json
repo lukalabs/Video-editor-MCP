@@ -12,7 +12,10 @@
       "label": "Conversation",
       "type": "text",
       "default": "received: hey! how did it go?\nsent: better than I expected\nreceived: I knew it would",
-      "description": "One message per line (\"|\" also separates, for paths that drop newlines). Prefix each with \"received:\" or \"sent:\", or the short \"r:\" / \"s:\" - unprefixed lines alternate, starting with received. Doubling the colon escapes it: \"sent:: hi\" is a message reading \"sent: hi\". Blank lines are ignored, and a message wrapped entirely in *asterisks* is a roleplay action rendered italic. Typing dots are inserted automatically before every received message, timed from its word count - not a parameter."
+      "description": "The conversation, one message per line. Start a line with \"received:\" or \"sent:\" (or the short \"r:\" / \"s:\") to say who is speaking; unprefixed lines alternate, beginning with received. Doubling the colon escapes it, so \"sent:: hi\" is a message reading \"sent: hi\". Blank lines are ignored, and a line wrapped entirely in *asterisks* is a roleplay action rendered italic. Typing dots are inserted automatically before every received message, timed from its word count - not a parameter. Over the API the lines are joined with newlines; \"|\" also separates, for callers that cannot send a newline.",
+      "multiline": true,
+      "lineSeparator": "\n",
+      "lineHint": "One message per line. Start a line with \"received:\" or \"sent:\" (or \"r:\" / \"s:\") to say who is speaking; unprefixed lines alternate, beginning with received. Typing dots are added automatically before each received message. Wrap a whole line in *asterisks* for an action."
     },
     {
       "key": "durationInSeconds",

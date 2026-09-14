@@ -10,7 +10,10 @@
       "label": "Headline",
       "type": "text",
       "default": "You talk | I'll listen",
-      "description": "The headline. Split into words automatically; a \"|\" starts a new phrase that replaces the previous one, so \"You talk | I'll listen\" plays as two phrases and \"Ship it\" as one."
+      "description": "The headline, one phrase per line. Each phrase plays in turn and replaces the previous one, and its words are animated separately. Over the API the lines are joined with \"|\", so \"You talk | I'll listen\" is two phrases and \"Ship it\" is one.",
+      "multiline": true,
+      "lineSeparator": "|",
+      "lineHint": "One phrase per line. Each phrase plays in turn, replacing the previous one; words inside a phrase are animated separately."
     },
     {
       "key": "fontFamily",

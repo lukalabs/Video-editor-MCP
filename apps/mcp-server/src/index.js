@@ -147,11 +147,13 @@ server.registerTool(
   {
     title: "List animated components",
     description:
-      "Lists the animated overlay components available to render (a stat counter, a 9:16 " +
-      "turbulent background, an orbit headline). Returns each component's " +
+      "Lists the animated overlay components available to render. Returns each component's " +
       "id, name, description and parameter schema — parameter types follow the editor's " +
-      "vocabulary: text, number, color, boolean, media. Call this before generate_component " +
-      "so you know which ids and props exist.",
+      "vocabulary: text, number, color, boolean, media. Some text params carry several " +
+      "lines in one delimited string (a chat thread's messages, a headline's phrases); the " +
+      "param's own description states the delimiter, and its `lineSeparator` gives the same " +
+      "answer as data. Call this before generate_component so you know which ids and props " +
+      "exist — the catalogue is read fresh from disk, so do not rely on a remembered list.",
     inputSchema: {},
   },
   async () => {
