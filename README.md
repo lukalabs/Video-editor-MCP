@@ -193,6 +193,14 @@ cd packages/project-kit && npm test    # 13 tests, pure JSON, no services needed
 cd apps/mcp-server && npm test         # 5 tests over a real stdio round-trip
 ```
 
+## Docs
+
+- [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) — symptoms seen in practice and their causes:
+  the 24fps timestamp rounding that makes composited components look like 16fps, `unknown format:`
+  render failures, motion blur, and out-of-memory service deaths.
+- [docs/button-component.md](docs/button-component.md) — the `button` component: every parameter,
+  all six animations, all four easings compared, and worked examples.
+
 ## Known limitations
 
 Documented with evidence in [NOTES.md](NOTES.md):

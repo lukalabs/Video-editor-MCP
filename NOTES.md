@@ -3238,3 +3238,49 @@ and scaled to 0.94. The instrument was wrong, not the render.
 `tsc --noEmit` is not a usable gate in this package: the `?scene` / `?project` virtual modules
 and the JSX runtime produce the same errors for the three pre-existing scenes. The new files add
 no new error categories.
+
+## Stage 24 — the button component, and why its slide looked like 16fps
+
+A generic `button` component: one scene covering the whole button set through parameters
+(label, size, colours, radius, filled vs outlined, shadow, `positionY`, `holdToEnd`,
+`slideSeconds`) rather than a component per style. Six animations, four easings, both
+free-text because the editor panel's `ParamType` has no dropdown control — an unknown name
+falls back to the default instead of failing the render.
+
+Two findings worth keeping.
+
+**`shadowColor={null}` fails the render.** With `shadow: false` the scene passed an explicit
+null shadow colour; it reaches the colour parser as an empty string and throws
+`unknown format:` from inside the browser, which surfaces as a generic render failure with no
+hint at the cause. Spread the shadow props conditionally instead of passing null.
+
+**The slide looked like it ran at 16fps, and it was not the animation.** Reported as choppy
+travel. Three fixes aimed at the animation — smaller steps, a longer duration, an even easing,
+then 8x motion blur with a 180-degree shutter — and every one of them measured clean, because
+each was measured on the component's own WebM, where nothing is wrong. The defect only exists
+once the file is composited.
+
+WebM timestamps are whole milliseconds. 24fps frames fall on 41.666...ms, so the encoded file
+carries 0, 42, 83, 125, 167 while a 24fps timeline asks for 0, 41.667, 83.333, 125, 166.667.
+At 41.667 the newest button frame is still the one from 0 — 42 has not arrived — so the
+compositor repeats it. Roughly every third frame holds: two move, one does not, which is 2/3
+of 24 and reads exactly as 16fps.
+
+Measured on the composite, the frame-to-frame difference during the travel was
+`108089, 9951, 267081, 174705, 4347, 358810, 273206, 4753, ...` — every third value collapsing
+to the footage-only noise floor. The fix is to rebuild the overlay's timestamps from its frame
+index rather than trust the stored ones:
+
+```
+[1:v]setpts=N/24/TB[b];[0:v][b]overlay=0:0
+```
+
+This is not specific to ffmpeg compositing. Any 24fps consumer of these files that honours
+their embedded timestamps hits the same rounding, the editor's own import path included — that
+is untested as of this stage.
+
+The lesson for instrumentation repeats Stage 23's: measure the artefact the user is looking at,
+not the intermediate that is convenient to measure. Three rounds of work went into the wrong
+layer because the component file kept coming back clean.
+
+Defaults after review: `easing: soft` (easeOutCubic), `slideSeconds: 0.8`.
