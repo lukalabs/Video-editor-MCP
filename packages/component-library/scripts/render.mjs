@@ -74,6 +74,10 @@ function parseArgs(argv) {
       case "--keep-frames":
         args.keepFrames = true;
         break;
+      case "--motion-blur":
+        args.motionBlur = Number(value);
+        i += 1;
+        break;
       default:
         throw new Error(`Unknown argument: ${flag}`);
     }
@@ -82,6 +86,11 @@ function parseArgs(argv) {
   if (!args.out) throw new Error("--out is required");
   if (args.background && !/^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(args.background)) {
     throw new Error(`--background must be a hex colour such as #00ff00 (got "${args.background}")`);
+  }
+  if (args.motionBlur !== undefined) {
+    if (!Number.isInteger(args.motionBlur) || args.motionBlur < 2 || args.motionBlur > 16) {
+      throw new Error(`--motion-blur must be a whole number from 2 to 16 (got "${args.motionBlur}")`);
+    }
   }
   return args;
 }
@@ -215,14 +224,29 @@ function runFfmpeg(args) {
  *  - chroma key (--background): the frames already carry a solid backdrop, so the alpha
  *    plane is pointless — plain yuv420p is smaller and decodes everywhere.
  */
-async function encodeWebm({ framesDir, fps, out, background }) {
+async function encodeWebm({ framesDir, fps, out, background, motionBlur }) {
   await fs.mkdir(path.dirname(out), { recursive: true });
+
+  // Motion blur: the frames were rendered at `fps * motionBlur`, so average each group of
+  // `motionBlur` of them into one output frame and keep every Nth result. That is what a real
+  // camera does within one exposure, and it is the only thing that stops a fast graphic move
+  // from stepping at 24fps — easing alone cannot, because the gap between samples is the
+  // problem. tmix works in RGBA here, so the alpha channel blends with the colour.
+  // 180-degree shutter: average only the first half of each group of sub-frames, the way a film
+  // camera exposes for half the frame interval. Averaging the whole interval (360 degrees) smears
+  // a fast move across its entire step, and that mush reads as stutter rather than motion.
+  const shutter = motionBlur ? Math.max(2, Math.round(motionBlur / 2)) : 0;
+  const blurFilter = motionBlur
+    ? ["-vf", `tmix=frames=${shutter}:weights='${Array(shutter).fill(1).join(" ")}',framestep=${motionBlur},fps=${fps}`]
+    : [];
+
   await runFfmpeg([
     "-y",
     "-framerate",
-    String(fps),
+    String(motionBlur ? fps * motionBlur : fps),
     "-i",
     path.join(framesDir, "%06d.png"),
+    ...blurFilter,
     "-c:v",
     "libvpx-vp9",
     "-pix_fmt",
@@ -255,8 +279,16 @@ async function main() {
   args.height = args.height || defaults.height || 1080;
   console.log(`[render] frame ${args.width}x${args.height} @ ${args.fps}fps`);
 
-  const { framesDir, frameCount } = await renderFrames(args);
-  await encodeWebm({ framesDir, fps: args.fps, out, background: args.background });
+  // Render at the multiplied rate so there are extra samples to blend down.
+  const renderFps = args.motionBlur ? args.fps * args.motionBlur : args.fps;
+  const { framesDir, frameCount } = await renderFrames({ ...args, fps: renderFps });
+  await encodeWebm({
+    framesDir,
+    fps: args.fps,
+    out,
+    background: args.background,
+    motionBlur: args.motionBlur,
+  });
 
   if (!args.keepFrames) {
     await fs.rm(framesDir, { recursive: true, force: true });

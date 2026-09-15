@@ -7,8 +7,8 @@
  * loads to drive that pipeline without the editor UI.
  *
  * Query parameters:
- *   project  component id (stat-counter | turbulent-background-Rep | orbit-headline-Rep
- *            | chat-bubble-single-Rep | chat-thread-Rep)
+ *   project  component id (stat-counter | button | turbulent-background-Rep
+ *            | orbit-headline-Rep | chat-bubble-single-Rep | chat-thread-Rep)
  *   props    URL-encoded JSON, read by src/lib/props.ts inside the project module
  *   fps      frames per second (default 30)
  *   width    frame width in px (default 1920)
@@ -21,6 +21,7 @@
 import { Renderer, Vector2 } from "@motion-canvas/core";
 import type { Project } from "@motion-canvas/core";
 
+import button from "./projects/button?project";
 import chatBubbleSingle from "./projects/chat-bubble-single-Rep?project";
 import chatThread from "./projects/chat-thread-Rep?project";
 import orbitHeadline from "./projects/orbit-headline-Rep?project";
@@ -29,6 +30,7 @@ import turbulentBackground from "./projects/turbulent-background-Rep?project";
 
 const PROJECTS: Record<string, Project> = {
   "stat-counter": statCounter,
+  button,
   "turbulent-background-Rep": turbulentBackground,
   "orbit-headline-Rep": orbitHeadline,
   "chat-bubble-single-Rep": chatBubbleSingle,
