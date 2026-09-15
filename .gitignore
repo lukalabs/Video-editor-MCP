@@ -20,3 +20,8 @@ storage/*.sqlite-wal
 storage/exports/
 .dev-stack.json
 .claude/skills/
+storage/inbox/*
+!storage/inbox/.gitkeep
+storage/caption-work/
+storage/captioned/
+storage/final/

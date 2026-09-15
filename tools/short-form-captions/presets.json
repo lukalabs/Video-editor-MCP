@@ -1,0 +1,65 @@
+{
+  "s2-let-me-guess": {
+    "label": "Hormozi",
+    "font": "Montserrat-Black.ttf",
+    "width": 1080,
+    "height": 1920,
+    "duration": 48.625,
+    "fontSize": 84,
+    "bandHeight": 460,
+    "preset": {
+      "animationStyle": "word-highlight",
+      "uppercase": true,
+      "color": "#ffffff",
+      "highlightColor": "#ffe81f",
+      "outlineScale": 0.17
+    }
+  },
+  "s1-alt-single-take": {
+    "label": "Clean minimal",
+    "font": "Poppins-Black.ttf",
+    "width": 1080,
+    "height": 1920,
+    "duration": 28.468,
+    "fontSize": 64,
+    "bandHeight": 400,
+    "preset": {
+      "animationStyle": "none",
+      "color": "#ffffff",
+      "highlightColor": "#ffffff",
+      "outlineScale": 0.08
+    }
+  },
+  "s1-almost-gave-up": {
+    "label": "TikTok Bounce",
+    "font": "Inter-Black.ttf",
+    "width": 1080,
+    "height": 1920,
+    "duration": 46.166667,
+    "fontSize": 74,
+    "bandHeight": 440,
+    "preset": {
+      "animationStyle": "bounce",
+      "color": "#ffffff",
+      "highlightColor": "#ffffff",
+      "outlineScale": 0.15
+    }
+  },
+  "s1-v3-selfie-daylight": {
+    "label": "Boxed",
+    "font": "Rubik-Black.ttf",
+    "width": 720,
+    "height": 1280,
+    "duration": 32.041667,
+    "fontSize": 60,
+    "bandHeight": 300,
+    "preset": {
+      "animationStyle": "word-by-word",
+      "color": "#ffffff",
+      "highlightColor": "#ffffff",
+      "backgroundColor": "rgba(0,0,0,0.82)",
+      "outlineScale": 0,
+      "shadowColor": "rgba(0,0,0,0)"
+    }
+  }
+}
