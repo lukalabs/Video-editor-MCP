@@ -4,7 +4,7 @@ import scene from "../scenes/chat-thread-Rep?scene";
 import { resolveProps } from "../lib/props";
 
 export const DEFAULT_PROPS = {
-  text: "received: hey! how did it go?\nsent: better than I expected\nreceived: I knew it would",
+  text: "rep: hey! how did it go?\nme: better than I expected\nrep: I knew it would",
   durationInSeconds: 8,
 };
 

@@ -38,9 +38,9 @@ import { ensureFont } from "../lib/text-measure";
 const FIT_MARGIN = 0.9;
 
 const DEFAULT_THREAD = [
-  "received: hey! how did it go?",
-  "sent: better than I expected",
-  "received: I knew it would",
+  "rep: hey! how did it go?",
+  "me: better than I expected",
+  "rep: I knew it would",
 ].join("\n");
 
 interface Row {

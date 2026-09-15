@@ -3300,7 +3300,7 @@ list of checkmarks is what let a 3.6x shadow error sit under a "verified" headin
 ## Stage 24 — multi-line text params
 
 Two components carry several items in one text param: orbit-headline-Rep's phrases (joined
-with "|") and chat-thread-Rep's messages (newline, with `received:` / `sent:` prefixes). The
+with "|") and chat-thread-Rep's messages (newline, with `rep:` / `me:` prefixes). The
 param vocabulary has no array type and is not gaining one — an agent still sends a single
 delimited string — but a person editing by hand should not have to remember the delimiter.
 
@@ -3370,3 +3370,37 @@ test will hit them:
   media carries its component in a module registry keyed by media id — the clip is only
   stamped with `componentId`/`props` once it reaches a track. Two probes were written against
   guesses at both before checking the DOM and the source.
+
+### Stage 24a — the prefix vocabulary is rep:/me:
+
+`received:` / `sent:` (and `r:` / `s:`) became `rep:` / `me:` (and `r:` / `m:`). "rep" is the
+companion, short for the product name; "me" is the user's own side — which is what the source
+called it internally (`from === "me"`), so the new vocabulary is closer to the original than
+the one it replaces. A clean replacement, not an alias: the component had no real usage beyond
+verification renders, and two parallel vocabularies would be worse than either.
+
+**The rename stops at the parsing boundary.** The internal `Sender` values stay
+`"received"` / `"sent"`, because the palette and the alignment are keyed on them, so
+`balloon-bubble.tsx` — the file holding the colour and side mapping — has a **zero diff**.
+That is the strongest available form of "the mapping did not change": not a re-verification,
+an unchanged file. The pixel check was run anyway, since the request touched adjacent code.
+
+Verified: rep -> `#ffffff` / `#242433` / left and me -> `#00004d` / `#ffffff` / right, sampled
+exactly from a render using both long and short forms, and again from an unprefixed thread to
+confirm alternation still opens on the rep side.
+
+**Where the old forms went:** they are now ordinary text, asserted rather than assumed —
+`parseThread("received: hi")` yields one message whose *text* is "received: hi". Also asserted:
+`maybe: tomorrow` and `report: done` are not eaten by the `m:` and `rep:` prefixes, since the
+regex requires the colon immediately after the marker.
+
+One thing worth knowing for the next colour check: **a webm cannot be used to assert an exact
+hex.** Sampling the UI-generated file showed `#252231` where the source frame had `#242433`,
+which looked like a rename bug. It is the VP9 encode: re-sampling the encode of the very same
+verified-exact PNG frames reproduces the shift. Exact-hex assertions belong on the renderer's
+PNG output; the webm is lossy by design.
+
+Left inconsistent on purpose, pending a decision: `chat-bubble-single-Rep`'s `sender` param
+still takes `"received"` / `"sent"` as its values. It is a different param on a different
+component and was outside this rename's scope, but the two components now describe the same
+two sides with different words.

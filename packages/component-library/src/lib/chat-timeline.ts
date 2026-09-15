@@ -76,7 +76,13 @@ export function readAction(text: string): { body: string; action: boolean } {
   return m ? { body: m[1].trim(), action: true } : { body: text, action: false };
 }
 
-const PREFIX = /^(sent|received|s|r)::?\s*/i;
+/**
+ * The sender prefixes. `rep` and `me` are the user-facing vocabulary; the internal `Sender`
+ * values stay `"received"` / `"sent"` because that is what the palette and the alignment are
+ * keyed on, and this rename is deliberately confined to the parsing boundary so the
+ * colour/side mapping keeps a zero diff.
+ */
+const PREFIX = /^(rep|me|r|m)::?\s*/i;
 
 /**
  * Parses the multi-message `text` param.
@@ -86,14 +92,16 @@ const PREFIX = /^(sent|received|s|r)::?\s*/i;
  * line (or one "|"-separated part, since not every path into a text param is guaranteed to
  * preserve newlines), optionally prefixed with its sender:
  *
- *     received: hey, are you around?
- *     sent: just got back - what's up
- *     received: tell me everything
+ *     rep: hey, are you around?
+ *     me: just got back - what's up
+ *     rep: tell me everything
  *
- * - `received:` / `sent:`, or the short `r:` / `s:`, case-insensitive.
- * - No prefix: alternate from the previous message, starting with `received`. So a bare
- *   list of lines is a back-and-forth without any markup at all.
- * - A doubled colon escapes: `sent:: no really` is a message whose text is "sent: no really".
+ * - `rep:` / `me:`, or the short `r:` / `m:`, case-insensitive. "rep" is the received side
+ *   (short for the product name); "me" is the sent side, which is also what the source
+ *   called it internally (`from === "me"`).
+ * - No prefix: alternate from the previous message, starting with `rep`. So a bare list of
+ *   lines is a back-and-forth without any markup at all.
+ * - A doubled colon escapes: `me:: no really` is a message whose text is "me: no really".
  * - Blank lines are ignored, so paragraph spacing in the param does not create empty bubbles.
  * - `*wrapped in asterisks*` marks a roleplay action (see readAction).
  */
@@ -117,7 +125,8 @@ export function parseThread(text: string): ChatMessage[] {
         from = nextSender(messages);
       } else {
         const marker = match[1].toLowerCase();
-        from = marker === "s" || marker === "sent" ? "sent" : "received";
+        // "me"/"m" is the sent side; "rep"/"r" the received one.
+        from = marker === "m" || marker === "me" ? "sent" : "received";
         body = part.slice(match[0].length);
       }
     } else {
@@ -131,7 +140,7 @@ export function parseThread(text: string): ChatMessage[] {
   return messages;
 }
 
-/** Alternate from the previous message; an unmarked thread opens with a received line. */
+/** Alternate from the previous message; an unmarked thread opens with a "rep" line. */
 function nextSender(messages: ChatMessage[]): Sender {
   const last = messages[messages.length - 1];
   if (!last) return "received";

@@ -11,11 +11,11 @@
       "key": "text",
       "label": "Conversation",
       "type": "text",
-      "default": "received: hey! how did it go?\nsent: better than I expected\nreceived: I knew it would",
-      "description": "The conversation, one message per line. Start a line with \"received:\" or \"sent:\" (or the short \"r:\" / \"s:\") to say who is speaking; unprefixed lines alternate, beginning with received. Doubling the colon escapes it, so \"sent:: hi\" is a message reading \"sent: hi\". Blank lines are ignored, and a line wrapped entirely in *asterisks* is a roleplay action rendered italic. Typing dots are inserted automatically before every received message, timed from its word count - not a parameter. Over the API the lines are joined with newlines; \"|\" also separates, for callers that cannot send a newline.",
+      "default": "rep: hey! how did it go?\nme: better than I expected\nrep: I knew it would",
+      "description": "The conversation, one message per line. Start a line with \"rep:\" (the companion) or \"me:\" (the user), or the short \"r:\" / \"m:\", to say who is speaking; unprefixed lines alternate, beginning with rep. Doubling the colon escapes it, so \"me:: hi\" is a message reading \"me: hi\". Blank lines are ignored, and a line wrapped entirely in *asterisks* is a roleplay action rendered italic. Typing dots are inserted automatically before every rep message, timed from its word count - not a parameter. Over the API the lines are joined with newlines; \"|\" also separates, for callers that cannot send a newline.",
       "multiline": true,
       "lineSeparator": "\n",
-      "lineHint": "One message per line. Start a line with \"received:\" or \"sent:\" (or \"r:\" / \"s:\") to say who is speaking; unprefixed lines alternate, beginning with received. Typing dots are added automatically before each received message. Wrap a whole line in *asterisks* for an action."
+      "lineHint": "One message per line. Start a line with \"rep:\" or \"me:\" (or \"r:\" / \"m:\") to say who is speaking; unprefixed lines alternate, beginning with rep. Typing dots are added automatically before each rep message. Wrap a whole line in *asterisks* for an action."
     },
     {
       "key": "durationInSeconds",
