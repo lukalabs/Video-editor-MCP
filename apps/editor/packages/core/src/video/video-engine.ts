@@ -15,6 +15,7 @@ import type {
 import type { TextClip } from "../text/types";
 import type { ShapeClip, EmphasisAnimation } from "../graphics/types";
 import { titleEngine } from "../text/title-engine";
+import { paintSubtitle } from "../text/caption-painter";
 import { graphicsEngine } from "../graphics/graphics-engine";
 import { VideoEffectsEngine } from "./video-effects-engine";
 import {
@@ -1089,7 +1090,7 @@ export class VideoEngine {
     this.renderParticlesToContext(ctx, time, width, height);
 
     for (const subtitle of activeSubtitles) {
-      this.renderSubtitleToCanvasCtx(ctx, subtitle, width, height);
+      this.renderSubtitleToCanvasCtx(ctx, subtitle, width, height, time);
     }
 
     await this.applyAdjustmentLayersToComposite(
@@ -2025,57 +2026,9 @@ export class VideoEngine {
     subtitle: Subtitle,
     canvasWidth: number,
     canvasHeight: number,
+    currentTime?: number,
   ): void {
-    const { text, style } = subtitle;
-    if (!text || text.trim().length === 0) return;
-
-    ctx.save();
-
-    const fontSize = style?.fontSize || 24;
-    const fontFamily = style?.fontFamily || "Inter";
-    const color = style?.color || "#ffffff";
-    const backgroundColor = style?.backgroundColor || "rgba(0, 0, 0, 0.7)";
-    const position = style?.position || "bottom";
-
-    ctx.font = `bold ${fontSize}px "${fontFamily}"`;
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-
-    const lines = text.split("\n");
-    const lineHeight = fontSize * 1.3;
-    const totalHeight = lines.length * lineHeight;
-
-    let baseY: number;
-    if (position === "top") {
-      baseY = fontSize * 2;
-    } else if (position === "center") {
-      baseY = canvasHeight / 2 - totalHeight / 2;
-    } else {
-      baseY = canvasHeight - fontSize * 2 - totalHeight;
-    }
-
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i].trim();
-      if (line.length === 0) continue;
-
-      const y = baseY + i * lineHeight + lineHeight / 2;
-      const metrics = ctx.measureText(line);
-      const bgWidth = metrics.width + 20;
-      const bgHeight = lineHeight;
-
-      ctx.fillStyle = backgroundColor;
-      ctx.fillRect(
-        canvasWidth / 2 - bgWidth / 2,
-        y - bgHeight / 2,
-        bgWidth,
-        bgHeight,
-      );
-
-      ctx.fillStyle = color;
-      ctx.fillText(line, canvasWidth / 2, y);
-    }
-
-    ctx.restore();
+    paintSubtitle(ctx, subtitle, canvasWidth, canvasHeight, currentTime);
   }
 
   private getClipsAtTime(track: Track, time: number): Clip[] {
