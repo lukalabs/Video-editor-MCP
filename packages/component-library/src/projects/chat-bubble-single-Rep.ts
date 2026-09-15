@@ -5,7 +5,7 @@ import { resolveProps } from "../lib/props";
 
 export const DEFAULT_PROPS = {
   text: "Hey, are you around?",
-  sender: "received",
+  sender: "rep",
   durationInSeconds: 2.5,
 };
 

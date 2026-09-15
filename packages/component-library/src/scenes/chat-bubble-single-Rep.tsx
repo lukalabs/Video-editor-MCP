@@ -28,14 +28,32 @@ import { ensureFont } from "../lib/text-measure";
 /** Share of the frame the column is allowed to occupy. */
 const FIT_MARGIN = 0.9;
 
+/**
+ * Reads the `sender` param: `rep` (the companion) or `me` (the user), matching
+ * chat-thread-Rep's line prefixes, with the same short forms.
+ *
+ * Strict on purpose. The previous version took anything starting with "s" as the sent side,
+ * which would have gone on silently accepting the old `"sent"` / `"received"` values as
+ * undocumented aliases — and an unrecognised value would have quietly rendered as the
+ * companion, i.e. the wrong colour and the wrong side with nothing to show it. The internal
+ * `Sender` values stay `"received"` / `"sent"`: the palette and the alignment are keyed on
+ * them, so this is a rename of the param's vocabulary only.
+ */
 function readSender(raw: string): Sender {
-  return raw.trim().toLowerCase().startsWith("s") ? "sent" : "received";
+  const value = raw.trim().toLowerCase();
+  if (value === "me" || value === "m") return "sent";
+  if (value === "rep" || value === "r") return "received";
+  throw new Error(
+    `[chat-bubble] sender "${raw}" is not a valid value — use "rep" (the companion) or ` +
+      `"me" (the user), or the short "r" / "m". The older "received" / "sent" names were ` +
+      `renamed; see the param description.`,
+  );
 }
 
 export default makeScene2D(function* (view) {
   const variables = useScene().variables;
   const rawText = String(variables.get("text", "Hey, are you around?")());
-  const sender = readSender(String(variables.get("sender", "received")()));
+  const sender = readSender(String(variables.get("sender", "rep")()));
   const totalDuration = Number(variables.get("durationInSeconds", 2.5)());
 
   // Before anything is measured: a fallback font would give the text a different width and

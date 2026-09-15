@@ -3404,3 +3404,21 @@ Left inconsistent on purpose, pending a decision: `chat-bubble-single-Rep`'s `se
 still takes `"received"` / `"sent"` as its values. It is a different param on a different
 component and was outside this rename's scope, but the two components now describe the same
 two sides with different words.
+
+### Stage 24b — the single bubble's sender param follows
+
+`chat-bubble-single-Rep`'s `sender` values became `rep` / `me` (with `r` / `m`), so both
+components describe the same two sides with the same words. Colour and side mapping untouched
+again — `balloon-bubble.tsx` still has a zero diff across both renames.
+
+**`readSender` is now strict, and that was the point.** It used to read anything starting with
+"s" as the sent side, so `"sent"` would have gone on working as an undocumented alias — the
+exact outcome a clean rename is meant to avoid — and any unrecognised value would have
+silently rendered as the companion: wrong colour, wrong side, nothing to show it. It now
+accepts only `rep` / `r` / `me` / `m` and throws otherwise, naming the valid values and
+saying the old ones were renamed.
+
+Verified: `rep` renders `#ffffff` / `#242433` on the left and `me` renders `#00004d` /
+`#ffffff` on the right, sampled exactly from PNG frames. `received`, `sent` and `nonsense`
+each fail the render with that error and write no output file; `r` and `m` still render, as
+the control that the rejection is about the value and not about strictness in general.

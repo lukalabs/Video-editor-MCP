@@ -18,8 +18,8 @@
       "key": "sender",
       "label": "Sender",
       "type": "text",
-      "default": "received",
-      "description": "\"received\" for one of hers - white bubble, dark text, left-aligned, growing from its bottom-left corner. \"sent\" for one of yours - deep indigo bubble, white text, right-aligned, growing from its bottom-right. Anything starting with \"s\" reads as sent; anything else as received."
+      "default": "rep",
+      "description": "Which side the bubble is. \"rep\" is the companion - white bubble, dark text, left-aligned, growing from its bottom-left corner. \"me\" is the user - deep indigo bubble, white text, right-aligned, growing from its bottom-right. The short \"r\" / \"m\" work too, and the same vocabulary is what chat-thread-Rep's line prefixes use. Any other value is rejected rather than guessed at."
     },
     {
       "key": "durationInSeconds",
