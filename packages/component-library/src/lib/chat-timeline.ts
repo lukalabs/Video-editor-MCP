@@ -28,6 +28,28 @@ export const USER_DELAY = 0.5;
 export const ENTER = 0.24;
 
 /**
+ * How long a bubble takes to leave: the entrance, played backwards.
+ *
+ * Aliased rather than given its own number, because the exit is not a second animation with
+ * a similar feel — it is the same one time-reversed (see exitTransform in balloon-bubble.tsx),
+ * and two constants that happen to be equal could drift apart.
+ *
+ * The source has no exit at all; this is new design, not a port. Everything about HOW it
+ * moves is still the source's, since it is the entrance run in reverse.
+ */
+export const EXIT = ENTER;
+
+/**
+ * Gap between one bubble starting to leave and the next, in a thread.
+ *
+ * 0.12s is the stagger orbit-headline-Rep already uses for its words (3.5 frames in that
+ * source). At half the exit duration, consecutive bubbles overlap by 50%, which reads as one
+ * wave leaving rather than a queue being served. Fixed rather than paced, for the same
+ * reason ENTER is fixed: it is motion character, not conversational pacing.
+ */
+export const EXIT_STAGGER = 0.12;
+
+/**
  * How long she "types" before a line lands: longer messages take longer, clamped at both
  * ends so a one-word reply still reads as a pause and an essay does not stall the clip.
  * Computed per message from its own word count — never a manual parameter.
@@ -53,11 +75,15 @@ export interface TimedMessage {
   appearAt: number;
   /** Received lines only: when the typing dots appear. They give way at `appearAt`. */
   typingFrom: number | null;
+  /** When this bubble starts leaving. Oldest first, staggered by EXIT_STAGGER. */
+  exitAt: number;
 }
 
 export interface Timeline {
   items: TimedMessage[];
-  /** Total length including the hold at the end. */
+  /** When the first (oldest) bubble starts leaving. */
+  exitFrom: number;
+  /** Total length: the hold, plus the whole staggered exit. */
   duration: number;
 }
 
@@ -159,23 +185,33 @@ function nextSender(messages: ChatMessage[]): Sender {
  */
 export function buildTimeline(messages: ChatMessage[], pace = 1): Timeline {
   let cursor = LEAD_IN * pace;
-  const items: TimedMessage[] = [];
+  const landed: { message: ChatMessage; appearAt: number; typingFrom: number | null }[] = [];
 
   messages.forEach((message, i) => {
     if (message.from === "received") {
       if (i > 0) cursor += SHE_REACTS * pace;
       const typingFrom = cursor;
       const appearAt = cursor + typingFor(message.text) * pace;
-      items.push({ message, appearAt, typingFrom });
+      landed.push({ message, appearAt, typingFrom });
       cursor = appearAt + ENTER;
     } else {
       if (i > 0) cursor += USER_DELAY * pace;
-      items.push({ message, appearAt: cursor, typingFrom: null });
+      landed.push({ message, appearAt: cursor, typingFrom: null });
       cursor += ENTER;
     }
   });
 
-  return { items, duration: cursor + HOLD_OUT * pace };
+  // The hold, then the wave out: oldest bubble first, one EXIT_STAGGER apart. The stack is
+  // NOT re-laid-out as bubbles go — they leave from where they sit, or the survivors would
+  // jump around mid-wave.
+  const exitFrom = cursor + HOLD_OUT * pace;
+  const items: TimedMessage[] = landed.map((entry, i) => ({
+    ...entry,
+    exitAt: exitFrom + i * EXIT_STAGGER,
+  }));
+  const lastExitAt = items.length > 0 ? items[items.length - 1].exitAt : exitFrom;
+
+  return { items, exitFrom, duration: lastExitAt + EXIT };
 }
 
 /**
@@ -189,7 +225,13 @@ export function buildTimeline(messages: ChatMessage[], pace = 1): Timeline {
  */
 export function paceFor(messages: ChatMessage[], target: number): number {
   const natural = buildTimeline(messages, 1).duration;
-  const fixed = messages.length * ENTER;
+  // Fixed: every entrance, the whole staggered exit. Only the pauses are elastic, so the
+  // exit is structurally unclippable — a tight duration squeezes the hold and the
+  // conversational beats instead.
+  const fixed =
+    messages.length * ENTER +
+    Math.max(0, messages.length - 1) * EXIT_STAGGER +
+    EXIT;
   const elastic = natural - fixed;
   if (elastic <= 0) return 1;
   return Math.max(0.05, (target - fixed) / elastic);
@@ -242,6 +284,19 @@ export function enterProgress(t: number, appearAt: number): number {
   if (t <= appearAt) return 0;
   if (t >= appearAt + ENTER) return 1;
   return (t - appearAt) / ENTER;
+}
+
+/**
+ * 0 -> 1 over the bubble's exit, then pinned at 1 (fully gone).
+ *
+ * The mirror of enterProgress. Feeding `1 - this` back through the entrance easing and
+ * transform is what makes the exit a time reversal rather than a lookalike — see
+ * exitTransform.
+ */
+export function exitProgress(t: number, exitAt: number): number {
+  if (t <= exitAt) return 0;
+  if (t >= exitAt + EXIT) return 1;
+  return (t - exitAt) / EXIT;
 }
 
 /** Is she typing at time t, and has that line not landed yet? */

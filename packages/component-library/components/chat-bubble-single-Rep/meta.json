@@ -1,7 +1,7 @@
 {
   "id": "chat-bubble-single-Rep",
   "name": "Chat Bubble Single Rep",
-  "description": "One Replika chat bubble arriving on the house 240ms ease-out, with the balloon Bezier silhouette. Renders 1:1 (1080x1080) with a transparent background. Text renders in DM Sans, a metric-matched stand-in for the licensed Pangea Text.",
+  "description": "One Replika chat bubble arriving on the house 240ms ease-out and leaving on the same curve reversed, with the balloon Bezier silhouette. Renders 1:1 (1080x1080) with a transparent background. Text renders in DM Sans, a metric-matched stand-in for the licensed Pangea Text.",
   "project": "src/projects/chat-bubble-single-Rep.ts",
   "durationParam": "durationInSeconds",
   "defaultWidth": 1080,
@@ -29,7 +29,7 @@
       "min": 0.5,
       "max": 30,
       "step": 0.5,
-      "description": "Clip length. The entrance is a fixed 240ms whatever this is set to - the source is explicit that a slower arrival reads as broken - so the remaining time holds the settled bubble. There is no exit animation, because the source has none."
+      "description": "Clip length. The bubble arrives over a fixed 240ms and leaves over the same 240ms played backwards, whatever this is set to - the source is explicit that a slower arrival reads as broken - so this sets how long it holds in between. Below 0.48s there is no hold left and the arrival is what gets truncated; the exit is never clipped."
     }
   ]
 }

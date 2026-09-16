@@ -5,23 +5,32 @@
  * lib/balloon-geometry.ts) with the house entrance — 240ms on cubic-bezier(0.23, 1, 0.32, 1),
  * fading, rising 10px and growing from 0.94, anchored to the corner the bubble belongs to.
  *
- * There is no exit. The source's `enterStyle` returns an empty style once the entrance
- * finishes and nothing else ever touches the bubble again, so the clip holds the settled
- * frame for the rest of its duration rather than inventing a way out.
+ * The exit is the entrance played backwards — the same ported transform, mirrored in time
+ * (see exitTransform). The source has no exit at all, so this half is new design; its shape
+ * is inherited rather than invented, which is why it reuses that one function instead of
+ * having a curve of its own.
  *
- * The entrance is a fixed 240ms and does NOT stretch with durationInSeconds — see ENTER in
- * lib/chat-timeline.ts for why.
+ * Both halves are a fixed 240ms and do NOT stretch with durationInSeconds — see ENTER in
+ * lib/chat-timeline.ts for why. The hold between them takes up the slack.
  */
 import { Node, makeScene2D } from "@motion-canvas/2d";
-import { createSignal, tween, useScene, waitFor } from "@motion-canvas/core";
+import { createSignal, tween, useScene } from "@motion-canvas/core";
 
 import {
   COLUMN_W,
   applyShadowScale,
   buildBubbleNode,
   entranceTransform,
+  exitTransform,
 } from "../lib/balloon-bubble";
-import { ENTER, easeOut, enterProgress, readAction, type Sender } from "../lib/chat-timeline";
+import {
+  EXIT,
+  easeOut,
+  enterProgress,
+  exitProgress,
+  readAction,
+  type Sender,
+} from "../lib/chat-timeline";
 import { FONT_FAMILY, FONT_URL } from "../lib/chat-font";
 import { ensureFont } from "../lib/text-measure";
 
@@ -82,20 +91,39 @@ export default makeScene2D(function* (view) {
   const restX =
     sender === "sent" ? COLUMN_W / 2 - bubble.width / 2 : -COLUMN_W / 2 + bubble.width / 2;
 
-  const enter = () =>
-    entranceTransform(easeOut(enterProgress(now(), 0)), sender, bubble.width, bubble.height);
+  /**
+   * When the bubble starts leaving, so that it has finished by the end of the clip.
+   *
+   * The hold is what shrinks to make room. Below ENTER + EXIT (0.48s) there is no hold left
+   * and the ENTRANCE is what gets truncated — the exit is never clipped, since a clip that
+   * ends mid-disappearance looks broken in a way a slightly clipped arrival does not. The
+   * param's own minimum is 0.5s, so the validated range never reaches that.
+   */
+  const exitAt = Math.max(0, totalDuration - EXIT);
 
-  bubble.node.x(() => restX + enter().x);
-  bubble.node.y(() => enter().y);
-  bubble.node.scale(() => enter().scale);
-  bubble.node.opacity(() => enter().opacity);
+  /** Entrance, hold, then the entrance in reverse — one transform, read in both directions. */
+  const phase = () => {
+    const t = now();
+    if (t >= exitAt) {
+      return exitTransform(exitProgress(t, exitAt), sender, bubble.width, bubble.height);
+    }
+    return entranceTransform(
+      easeOut(enterProgress(t, 0)),
+      sender,
+      bubble.width,
+      bubble.height,
+    );
+  };
+
+  bubble.node.x(() => restX + phase().x);
+  bubble.node.y(() => phase().y);
+  bubble.node.scale(() => phase().scale);
+  bubble.node.opacity(() => phase().opacity);
 
   view.add(<Node scale={zoom}>{bubble.node}</Node>);
 
-  // A clip shorter than the entrance truncates it rather than compressing it: the 240ms is
-  // the thing being ported, so a 0.1s clip shows the first 0.1s of the arrival.
-  const span = Math.min(ENTER, totalDuration);
-  yield* tween(span, (value) => now(value * span));
-  now(span);
-  yield* waitFor(Math.max(0, totalDuration - span));
+  // One tween across the whole clip: entrance, hold and exit are all read from `now`, so
+  // there is no seam between them to get the phase boundaries wrong at.
+  yield* tween(totalDuration, (value) => now(value * totalDuration));
+  now(totalDuration);
 });

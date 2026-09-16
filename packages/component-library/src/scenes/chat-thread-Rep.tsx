@@ -9,6 +9,11 @@
  * produces: the newest bubble sits at the baseline and the thread shifts up as each one
  * lands — including the temporary shift when the typing bubble appears and is then replaced
  * in place by the line it was standing in for.
+ *
+ * After the hold, the thread leaves as a wave: each bubble plays the entrance in reverse
+ * (exitTransform), oldest first, one EXIT_STAGGER apart. They go from where they sit — the
+ * stack is deliberately NOT re-laid-out as they leave, or the survivors would jump around
+ * mid-wave. The source has no exit at all, so this part is new design.
  */
 import { Node, makeScene2D } from "@motion-canvas/2d";
 import { createSignal, tween, useScene } from "@motion-canvas/core";
@@ -19,6 +24,7 @@ import {
   buildBubbleNode,
   buildTypingNode,
   entranceTransform,
+  exitTransform,
 } from "../lib/balloon-bubble";
 import { GAP_CROSS, GAP_SAME } from "../lib/balloon-geometry";
 import { FONT_FAMILY, FONT_URL } from "../lib/chat-font";
@@ -27,6 +33,7 @@ import {
   dotState,
   easeOut,
   enterProgress,
+  exitProgress,
   isTyping,
   paceFor,
   parseThread,
@@ -162,18 +169,26 @@ export default makeScene2D(function* (view) {
       return at === -1 ? null : rows[at];
     };
 
-    const enter = () =>
-      entranceTransform(
-        easeOut(enterProgress(now(), item.appearAt)),
+    /** Arriving, settled, or leaving — one transform read in both directions. */
+    const phase = () => {
+      const t = now();
+      if (t >= item.exitAt) {
+        return exitTransform(exitProgress(t, item.exitAt), from, bubble.width, bubble.height);
+      }
+      return entranceTransform(
+        easeOut(enterProgress(t, item.appearAt)),
         from,
         bubble.width,
         bubble.height,
       );
+    };
 
-    bubble.node.x(() => restX + enter().x);
-    bubble.node.y(() => (row()?.y ?? 0) + enter().y);
-    bubble.node.scale(() => enter().scale);
-    bubble.node.opacity(() => (row() === null ? 0 : enter().opacity));
+    bubble.node.x(() => restX + phase().x);
+    // The row it settled into, held for the whole exit: layoutAt keeps every arrived bubble
+    // in place, so a leaving one does not drag the others with it.
+    bubble.node.y(() => (row()?.y ?? 0) + phase().y);
+    bubble.node.scale(() => phase().scale);
+    bubble.node.opacity(() => (row() === null ? 0 : phase().opacity));
     column.add(bubble.node);
   });
 

@@ -33,6 +33,7 @@ import {
   DOT_SIZE,
   type Sender,
   dotState,
+  easeOut,
 } from "./chat-timeline";
 import { measureText, type MeasureOptions } from "./text-measure";
 
@@ -271,6 +272,38 @@ export function entranceTransform(
     scale,
     opacity: eased,
   };
+}
+
+/**
+ * The exit: the entrance, played backwards.
+ *
+ * `exitTransform` is defined as the entrance's state at time `ENTER - t`, which is what
+ * "time-reversed" has to mean if the exit is to be the same motion rather than a lookalike.
+ * The entrance at wall time `s` is `entranceTransform(easeOut(s / ENTER))`, so the reverse is
+ *
+ *     entranceTransform(easeOut(1 - t / EXIT))
+ *
+ * and the easing sits INSIDE the mirror. Mirroring the raw progress instead —
+ * `entranceTransform(1 - t / EXIT)` — would run the exit linearly and differ visibly through
+ * the middle of the 240ms, however similar the two endpoints look.
+ *
+ * Written as a call into `entranceTransform` rather than as its own arithmetic, so the
+ * symmetry is a property of the code and not a claim about it: there is one set of
+ * opacity/translateY/scale/corner-anchor maths and both directions read from it. The
+ * mirrored arguments are equal by construction — `easeOut(s / ENTER)` and
+ * `easeOut(1 - (ENTER - s) / ENTER)` are the same number — so the directions agree exactly
+ * rather than closely.
+ *
+ * `exited` is 0 at the moment the bubble starts leaving and 1 once it is gone (see
+ * exitProgress). The source has no exit at all; only the shape of this one is inherited.
+ */
+export function exitTransform(
+  exited: number,
+  from: Sender,
+  width: number,
+  height: number,
+): { x: number; y: number; scale: number; opacity: number } {
+  return entranceTransform(easeOut(1 - exited), from, width, height);
 }
 
 export { COLUMN_W };

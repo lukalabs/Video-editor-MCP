@@ -3498,3 +3498,75 @@ Worth recording, because each cost a run and the next UI test will meet them:
   called `MCP-claude-test-2-MCP`, so a name-based "is it gone from Uncategorized" check fails
   because a *different* project of that name is still there. Identity assertions go through
   ids.
+
+## Stage 26 — exit animations
+
+New design, not a port: the source has no exit at all. So the question was not "what does the
+original do" but "what can we derive from it", and the answer is the entrance, backwards.
+
+### exitTransform is one function read in two directions
+
+`exitTransform(exited) = entranceTransform(easeOut(1 - exited))`. It is a call into the
+entrance's own transform, not a second implementation, so the symmetry is a property of the
+code rather than a claim about it.
+
+**The easing has to sit inside the mirror.** The request's formula was
+`entranceTransform(1 - t / EXIT)`, which drops it — the entrance is
+`entranceTransform(easeOut(p))`, so mirroring the raw progress instead of the eased one gives
+a *linear* exit. Measured, that formulation diverges from a true time reversal by up to
+**6.18px of translate, 0.54 of opacity and 0.033 of scale** — endpoints identical, middle
+visibly wrong. Corrected before building.
+
+### Fitting it into the duration
+
+`EXIT` is aliased to `ENTER` rather than given its own 0.24, because two constants that happen
+to be equal can drift apart. `EXIT_STAGGER` is 0.12, the interval orbit-headline-Rep already
+uses for its words: half the exit duration, so consecutive bubbles overlap by 50% and the
+thread reads as one wave leaving rather than a queue being served.
+
+- **Single bubble:** entrance, hold, exit. The hold absorbs the slack. Below 0.48s there is no
+  hold left and the *entrance* truncates — the exit is never clipped, because a clip ending
+  mid-disappearance looks broken in a way a slightly clipped arrival does not. The param's own
+  minimum is 0.5s, so the validated range never gets there.
+- **Thread:** the exit joins `paceFor`'s fixed cost
+  (`n×ENTER + (n−1)×EXIT_STAGGER + EXIT`), so only the pauses are elastic and the wave is
+  structurally unclippable. The single pace factor is kept rather than special-casing the hold
+  to collapse first: that model is already verified end to end, and a marginally nicer
+  degenerate case is not worth replacing it.
+- **Bubbles leave from where they sit.** `layoutAt` keeps every arrived bubble in its row
+  through the exit; re-laying out the stack as bubbles went would make the survivors jump
+  around mid-wave.
+
+The full mirrored transform is used for the thread, not the plain-fade fallback that was
+allowed: rendered and looked at, the staggered corner-anchored shrink reads cleanly, because
+each bubble collapses toward its own side while its neighbours hold still.
+
+### Verification
+
+| | result |
+|---|---|
+| 1. symmetry | 1001 samples × 2 senders × 3 sizes: worst delta **1.4e-14** (float round-off from the mirror's one subtraction — both directions call the same function). 4/4 mutations caught |
+| 2. exit in pixels | monotonic 1.00 → 0.29 → 0, largest single-frame step 0.29 (a pop would be ~1.0), anchored-edge drift **0px**, and the mirror holds **frame for frame: delta 0.0000** at every sampled instant |
+| 3. stagger order | 3 messages: half-faded at 7.733 / 7.867 / 8.000, strictly oldest-first; bubble 0 gone at 7.767 as the last starts at 7.760 |
+| 4. generalization | 5 messages at 14s: strictly ordered, last bubble finishes exactly at 14.000; schedules land on target for both 8s/3 and 14s/5 |
+| 5. regression | entrance anchoring 0px drift both senders, opacity ramp 0.0017 vs the eased curve (0.543 vs linear), fills exactly `#ffffff`/`#242433` and `#00004d`/`#ffffff`; balloon-geometry.ts, text-measure.ts and chat-font.ts all have a **zero diff** |
+
+Timeline regression rewritten around the change rather than relaxed: it now asserts the
+arrival schedule is still **identical to the source's** (delta 0) and that our duration is the
+source's *plus exactly the exit wave*. 16 new exit-wave assertions on top.
+
+### Two things the measurement got wrong first
+
+- **"Exact by construction" was too strong.** Both directions do share one function, but
+  sampling the mirror needs one subtraction, and `1 - (EXIT - s)/EXIT` is not bit-identical to
+  `s/EXIT`. The residual is 1.4e-14 — physically zero, but not zero, and the test now says so
+  with a stated tolerance instead of claiming exactness it does not have.
+- **A symmetry test cannot see a change made to both sides at once.** Mutating the shared
+  `(1 - eased) * 10` to `* 14` left symmetry perfectly intact — correctly, since that is what
+  shared implementation means. The gap was real though: the entrance's own magnitudes were
+  unpinned by this test. Endpoint assertions now pin the 10px travel alongside the 0.94 scale,
+  and that mutation is caught.
+
+Also worth keeping: the renderer emits **one frame past the duration** (92 frames for a 1.5s
+clip at 60fps), so "the last frame" is not `t = duration`. An index-based mirror is off by one
+because of it; pair frames by time.
