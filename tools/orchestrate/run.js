@@ -462,6 +462,7 @@ export async function runMake(prompt, flags) {
   log(`\nrun ${runId}`);
 
   await execute(state, flags);
+  return runId;
 }
 
 export async function runResume(runId, flags) {
@@ -486,4 +487,5 @@ export async function runResume(runId, flags) {
 
   log("");
   await execute(state, flags);
+  return state.runId;
 }

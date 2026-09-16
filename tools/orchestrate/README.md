@@ -22,10 +22,35 @@ Captions, button and packshot arrive as real objects you can select and change.
 Nothing is burned into the pixels — same promise as `project-cli`, which this
 drives rather than replaces.
 
-## Commands
+## The short way
 
 ```bash
-orchestrate make "<prompt>" [flags]     # the whole chain
+orchestrate start
+```
+
+Brings the three servers up if they are not already, then asks:
+
+```
+make ▸ a redhead woman in a sunny dorm room says […]
+```
+
+It plans, takes the screenshot, writes the video prompt, shows you what a render
+would cost — and then asks once before spending. Answer `n` and it stays a dry
+run you can pay for later. Then it asks again, until you type `quit`.
+
+At the prompt you can also type `720p` / `1080p` / `480p` to change resolution,
+`clip <path>` to edit a clip you already have instead of rendering one (free),
+`clip` on its own to go back to rendering, `again` to repeat, or `help`.
+
+`orchestrate stop` shuts the servers down. They keep running after `quit`, which
+is usually what you want.
+
+## Every command
+
+```bash
+orchestrate start                       # the above
+orchestrate stop                        # servers down
+orchestrate make "<prompt>" [flags]     # one run, scriptable
 orchestrate resume <run-id> [flags]     # continue one, without paying twice
 orchestrate plan "<prompt>"             # just the planning. Free, no side effects
 orchestrate doctor                      # is everything this needs running?
@@ -48,21 +73,27 @@ orchestrate doctor                      # is everything this needs running?
 | `--no-serve` / `--open` | serve | hand the finished project to the editor, or don't |
 | `--keep <n>` | `8` | how many served copies to leave in the editor's public folder |
 
-## Before the first run
+## The servers
+
+`start` handles them. `doctor` deliberately does not — when something is wrong,
+a server you started yourself in a terminal you can read beats a tidy one-liner:
 
 ```bash
 orchestrate doctor
 ```
 
 It checks the three servers, ffmpeg, Chrome, the whisper virtualenv and the
-Gemini key, and prints the exact command for anything that is missing. It starts
-nothing — they are your servers, in your terminals, where you can read their logs.
+Gemini key, and prints the exact command for anything missing. To run them by
+hand:
 
 ```bash
 cd ~/scripts-code/ui-animation/ui-snap       && bun dev                        # :3000
 cd ~/scripts-code/ugc-farm                   && python3 ugc.py serve           # :8765
 cd apps/editor && pnpm --filter @openreel/web dev                              # :5173
 ```
+
+Started by `start` instead, they run detached and log to
+`storage/orchestrate/logs/`, so one that dies leaves an explanation behind.
 
 ## Telling it what to do
 

@@ -2,6 +2,11 @@
 /**
  * One prompt, one editable project.
  *
+ *   orchestrate start
+ *
+ * brings the three servers up and then asks what you want to make, which is the
+ * way this is meant to be used. Everything below is the same thing, scriptable.
+ *
  *   orchestrate make "a redhead woman in a sunny dorm room says […], holding her
  *                     phone with the Replika Memory screen on it, TikTok subtitles,
  *                     a 'Try Replika now' button at the end, and the packshot"
@@ -154,7 +159,24 @@ async function cmdResume(args) {
   await runResume(runId, readFlags(args));
 }
 
-const COMMANDS = { make: cmdMake, resume: cmdResume, plan: cmdPlan, doctor: cmdDoctor };
+async function cmdStart(args) {
+  const { runSession } = await import("./session.js");
+  await runSession(readFlags(args));
+}
+
+async function cmdStop() {
+  const { runStop } = await import("./session.js");
+  runStop();
+}
+
+const COMMANDS = {
+  start: cmdStart,
+  stop: cmdStop,
+  make: cmdMake,
+  resume: cmdResume,
+  plan: cmdPlan,
+  doctor: cmdDoctor,
+};
 
 /* --------------------------------------------------------------------- main */
 
@@ -163,7 +185,13 @@ const command = args._[0];
 
 if (!command || !COMMANDS[command]) {
   console.error(`usage: orchestrate <${Object.keys(COMMANDS).join("|")}> [...]`);
-  console.error(`       orchestrate make "<prompt>" [--dry-run] [--spend] [--media <file>]`);
+  console.error("");
+  console.error("  orchestrate start              bring everything up, then just ask you what to make");
+  console.error("  orchestrate stop               shut the servers down");
+  console.error('  orchestrate make "<prompt>"    one run [--dry-run] [--spend] [--media <file>]');
+  console.error("  orchestrate resume <run-id>    continue one, without paying twice");
+  console.error('  orchestrate plan "<prompt>"    just the planning. Free');
+  console.error("  orchestrate doctor             is everything running?");
   process.exit(1);
 }
 
