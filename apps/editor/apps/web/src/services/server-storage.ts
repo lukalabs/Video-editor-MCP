@@ -97,6 +97,28 @@ export async function listServerProjectFolders(): Promise<string[]> {
   return body.folders;
 }
 
+/**
+ * Re-files a project, sending only the new folder.
+ *
+ * Uses the narrow `/projects/:id/folder` route rather than a full PUT: the project list
+ * carries summaries, not project JSON, so re-filing a project that is not open would
+ * otherwise mean fetching the whole blob to change one column.
+ */
+export async function setServerProjectFolder(
+  projectId: string,
+  folder: string,
+): Promise<{ id: string; folder: string; updatedAt: number }> {
+  const response = await fetch(
+    `${BASE}/projects/${encodeURIComponent(projectId)}/folder`,
+    {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ folder }),
+    },
+  );
+  return asJson(response, "Moving project to a folder");
+}
+
 export async function loadServerProject(
   id: string,
 ): Promise<{ id: string; name: string; project: Project; updatedAt: number }> {
@@ -113,9 +135,18 @@ export async function loadServerProject(
  * own autosave serialiser, which drops `blob`, `fileHandle`, `waveformData` and
  * session-local `blob:` thumbnail URLs.
  */
+/**
+ * Writes the project to the server.
+ *
+ * `folder` is optional and only sent when given, because the route treats an absent folder
+ * as "leave whatever is stored alone" — so an ordinary save from the editor cannot reset a
+ * folder someone set, while a save made with the picker filled in can set one. Pass an empty
+ * string to clear it back to the default.
+ */
 export async function saveServerProject(
   project: Project,
   expectedUpdatedAt?: number | null,
+  folder?: string,
 ): Promise<{ updatedAt: number }> {
   const stripped = JSON.parse(serializeProjectForAutoSave(project)) as Project;
   const response = await fetch(`${BASE}/projects/${encodeURIComponent(project.id)}`, {
@@ -126,6 +157,7 @@ export async function saveServerProject(
       project: stripped,
       // Omitted (or null) means "overwrite regardless", which is the old behaviour.
       ...(expectedUpdatedAt != null ? { expectedUpdatedAt } : {}),
+      ...(folder !== undefined ? { folder } : {}),
     }),
   });
 

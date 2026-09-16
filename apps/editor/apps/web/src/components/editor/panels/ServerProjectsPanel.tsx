@@ -6,11 +6,14 @@ import {
   fetchServerMedia,
   listServerProjects,
   loadServerProject,
+  listServerProjectFolders,
   ProjectConflictError,
   saveServerProject,
+  setServerProjectFolder,
   DEFAULT_PROJECT_FOLDER,
   type ProjectSummary,
 } from "../../../services/server-storage";
+import { FolderPicker } from "./FolderPicker";
 import { toast } from "../../../stores/notification-store";
 import { useProjectStore } from "../../../stores/project-store";
 
@@ -42,11 +45,32 @@ export const ServerProjectsPanel: React.FC = () => {
   const [conflict, setConflict] = useState<ProjectConflictError | null>(null);
   /** "" means every folder. Filtering happens client-side: the list is already loaded. */
   const [folderFilter, setFolderFilter] = useState("");
+  /**
+   * Folders as the SERVER reports them, from GET /projects/folders — deliberately not the
+   * `folders` list derived from the loaded projects below. The two agree today, but the
+   * pickers should offer what the server knows, so a folder created by another client (or by
+   * an agent over MCP) shows up on the next refresh without depending on this browser
+   * having loaded a project from it.
+   */
+  const [serverFolders, setServerFolders] = useState<string[]>([]);
+  /** The folder the next save files the project under. "" leaves it where it is. */
+  const [saveFolder, setSaveFolder] = useState("");
+  /** Which card has its re-file row open, and what has been typed into it. */
+  const [movingId, setMovingId] = useState<string | null>(null);
+  const [moveFolder, setMoveFolder] = useState("");
 
   const refresh = useCallback(async () => {
     setError(null);
     try {
-      setProjects(await listServerProjects());
+      // Both in one pass: the list drives the grouped display, the folder list drives the
+      // pickers. Fetched together so a newly created folder cannot be offered by one and
+      // missing from the other.
+      const [list, folderNames] = await Promise.all([
+        listServerProjects(),
+        listServerProjectFolders(),
+      ]);
+      setProjects(list);
+      setServerFolders(folderNames);
     } catch (err) {
       setProjects(null);
       setError(err instanceof Error ? err.message : "Could not reach the server");
@@ -95,7 +119,13 @@ export const ServerProjectsPanel: React.FC = () => {
         // getFullProject() merges in text/shape/SVG/sticker clips, which live in the
         // engines rather than the store (see Stage 1 notes).
         const full = getFullProject();
-        const result = await saveServerProject(full, force ? null : knownUpdatedAt);
+        // Only sent when the picker has something in it: an empty field means "leave the
+        // stored folder alone", which is what an ordinary save should do.
+        const result = await saveServerProject(
+          full,
+          force ? null : knownUpdatedAt,
+          saveFolder.trim() === "" ? undefined : saveFolder.trim(),
+        );
         setKnownUpdatedAt(result.updatedAt);
         setConflict(null);
         toast.success("Project saved to the server", full.name);
@@ -116,7 +146,32 @@ export const ServerProjectsPanel: React.FC = () => {
         setBusy(null);
       }
     },
-    [getFullProject, knownUpdatedAt, refresh],
+    [getFullProject, knownUpdatedAt, refresh, saveFolder],
+  );
+
+  /**
+   * Re-files one project. Sends only the folder, over the narrow route — the list holds
+   * summaries, so a full PUT would mean fetching the whole project to change one column.
+   */
+  const handleMove = useCallback(
+    async (summary: ProjectSummary, folder: string) => {
+      setBusy("Moving…");
+      setError(null);
+      try {
+        const moved = await setServerProjectFolder(summary.id, folder.trim());
+        setMovingId(null);
+        setMoveFolder("");
+        toast.success(`Moved to ${moved.folder}`, summary.name);
+        await refresh();
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Unknown error";
+        setError(message);
+        toast.error("Could not move the project", message);
+      } finally {
+        setBusy(null);
+      }
+    },
+    [refresh],
   );
 
   const handleOpen = useCallback(
@@ -195,6 +250,22 @@ export const ServerProjectsPanel: React.FC = () => {
         >
           Refresh
         </button>
+      </div>
+
+      <div className="mt-2">
+        <FolderPicker
+          id="server-projects-save-folder"
+          label="Folder"
+          ariaLabel="Save into folder"
+          value={saveFolder}
+          onChange={setSaveFolder}
+          options={serverFolders}
+          disabled={busy !== null}
+        />
+        <p className="mt-1 text-[11px] leading-4 text-fg-muted">
+          Pick an existing folder or type a new one. Leave it blank to keep this project
+          where it already is.
+        </p>
       </div>
 
       <p className="mt-2 text-[11px] text-fg-muted">
@@ -295,26 +366,93 @@ export const ServerProjectsPanel: React.FC = () => {
             <ul className="flex flex-col gap-2">
               {grouped.get(folder)!.map((summary) => (
                 <li key={summary.id}>
-                  <button
-                    type="button"
-                    aria-label={`Open server project ${summary.name}`}
-                    disabled={busy !== null}
-                    onClick={() => void handleOpen(summary)}
-                    className={`w-full rounded-lg border p-3 text-left transition-colors ${
+                  {/* Open and Move are siblings rather than nested: the card used to be one
+                      big button, and a button inside a button is invalid. */}
+                  <div
+                    className={`flex items-start gap-1 rounded-lg border transition-colors ${
                       summary.id === project.id
                         ? "border-accent bg-selected"
                         : "border-border/70 bg-bg-2"
                     }`}
                   >
-                    <span className="block text-[13px] font-semibold text-fg">
-                      {summary.name}
-                    </span>
-                    <span className="mt-0.5 block text-[11px] text-fg-muted">
-                      {summary.folder} · updated{" "}
-                      {new Date(summary.updatedAt).toLocaleString()}
-                      {summary.id === project.id ? " · open" : ""}
-                    </span>
-                  </button>
+                    <button
+                      type="button"
+                      aria-label={`Open server project ${summary.name}`}
+                      disabled={busy !== null}
+                      onClick={() => void handleOpen(summary)}
+                      className="min-w-0 flex-1 p-3 text-left"
+                    >
+                      <span className="block truncate text-[13px] font-semibold text-fg">
+                        {summary.name}
+                      </span>
+                      <span className="mt-0.5 block text-[11px] text-fg-muted">
+                        {summary.folder} · updated{" "}
+                        {new Date(summary.updatedAt).toLocaleString()}
+                        {summary.id === project.id ? " · open" : ""}
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      aria-label={`Move project ${summary.name} to a folder`}
+                      aria-expanded={movingId === summary.id}
+                      disabled={busy !== null}
+                      onClick={() => {
+                        const opening = movingId !== summary.id;
+                        setMovingId(opening ? summary.id : null);
+                        // Prefilled with where it already is, so the field shows the current
+                        // answer rather than an empty box. The default folder is not a real
+                        // folder, so it starts blank in that case.
+                        setMoveFolder(
+                          opening && summary.folder !== DEFAULT_PROJECT_FOLDER
+                            ? summary.folder
+                            : "",
+                        );
+                      }}
+                      className="m-2 shrink-0 rounded-md border border-border/70 px-2 py-1 text-[11px] font-medium text-fg-muted"
+                    >
+                      Move
+                    </button>
+                  </div>
+
+                  {movingId === summary.id && (
+                    <div className="mt-1.5 rounded-lg border border-border/70 bg-bg-2 p-2">
+                      <FolderPicker
+                        id={`server-projects-move-${summary.id}`}
+                        label="To"
+                        ariaLabel={`New folder for ${summary.name}`}
+                        value={moveFolder}
+                        onChange={setMoveFolder}
+                        options={serverFolders}
+                        disabled={busy !== null}
+                      />
+                      <div className="mt-2 flex gap-2">
+                        <button
+                          type="button"
+                          aria-label={`Confirm moving ${summary.name}`}
+                          disabled={busy !== null}
+                          onClick={() => void handleMove(summary, moveFolder)}
+                          className="rounded-md bg-accent px-2.5 py-1 text-[11px] font-semibold text-white"
+                        >
+                          Move
+                        </button>
+                        <button
+                          type="button"
+                          aria-label={`Cancel moving ${summary.name}`}
+                          disabled={busy !== null}
+                          onClick={() => {
+                            setMovingId(null);
+                            setMoveFolder("");
+                          }}
+                          className="rounded-md border border-border/70 px-2.5 py-1 text-[11px] font-medium text-fg-muted"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                      <p className="mt-1.5 text-[11px] leading-4 text-fg-muted">
+                        Blank moves it back to {DEFAULT_PROJECT_FOLDER}.
+                      </p>
+                    </div>
+                  )}
                 </li>
               ))}
             </ul>

@@ -196,6 +196,24 @@ export function normaliseFolder(folder) {
   return trimmed;
 }
 
+/**
+ * Re-files a project without touching its JSON.
+ *
+ * Separate from `upsertProject` because re-filing is the one folder change a caller can make
+ * without holding the project: the editor's list carries summaries only, so requiring the
+ * full blob would mean fetching a whole project to change one column. Returns `null` when
+ * there is no such project, so the route can answer 404 rather than silently doing nothing.
+ */
+export function setProjectFolder(id, folder) {
+  const now = Date.now();
+  const value = normaliseFolder(folder);
+  const result = getDb()
+    .prepare("UPDATE projects SET folder = ?, updated_at = ? WHERE id = ?")
+    .run(value, now, id);
+  if (result.changes === 0) return null;
+  return { id, folder: value ?? DEFAULT_PROJECT_FOLDER, updatedAt: now };
+}
+
 export function deleteProject(id) {
   const result = getDb().prepare("DELETE FROM projects WHERE id = ?").run(id);
   return result.changes > 0;

@@ -19,6 +19,7 @@ import {
   listMedia,
   listProjectFolders,
   listProjects,
+  setProjectFolder,
   upsertComponentMetadata,
   upsertProject,
 } from "./db.js";
@@ -164,6 +165,25 @@ export async function registerStorageRoutes(app) {
     // folder is passed through as-is: undefined leaves whatever is stored alone, so an
     // ordinary editor save cannot reset it.
     return upsertProject({ id: request.params.id, name: projectName, project, folder });
+  });
+
+  /**
+   * Re-file a project, without its JSON.
+   *
+   * A folder-only PUT to /projects/:id is not possible: that route requires the whole
+   * project object, and the editor's list holds summaries only — so re-filing a project
+   * that is not currently open would mean fetching the entire blob to change one column.
+   * Hence a narrow route. It deliberately does NOT take expectedUpdatedAt: moving a project
+   * between folders does not conflict with someone editing its contents.
+   */
+  app.put("/projects/:id/folder", async (request, reply) => {
+    const { folder } = request.body ?? {};
+    if (folder !== undefined && folder !== null && typeof folder !== "string") {
+      return reply.code(400).send({ error: "folder must be a string" });
+    }
+    const moved = setProjectFolder(request.params.id, folder ?? "");
+    if (!moved) return reply.code(404).send({ error: "Unknown project" });
+    return moved;
   });
 
   app.delete("/projects/:id", async (request, reply) => {

@@ -3422,3 +3422,79 @@ Verified: `rep` renders `#ffffff` / `#242433` on the left and `me` renders `#000
 `#ffffff` on the right, sampled exactly from PNG frames. `received`, `sent` and `nonsense`
 each fail the render with that error and write no output file; `r` and `m` still render, as
 the control that the rejection is about the value and not about strictness in general.
+
+## Stage 25 — manual folder assignment in the editor
+
+Stage 22 built the folder backend and a read-only display. This adds the two write paths a
+person needs: choosing a folder when saving, and re-filing an existing project.
+
+### A folder-only route, because the list holds summaries
+
+`PUT /projects/:id` requires the whole project object, so a folder-only body 400s. That could
+have been worked around by sending a cached project — except the panel's list carries
+*summaries*, not project JSON, so re-filing a project that is not currently open would mean
+fetching the entire blob to change one column. Hence `PUT /projects/:id/folder`, backed by
+`setProjectFolder`, which touches only that column and `updated_at`.
+
+It deliberately takes no `expectedUpdatedAt`: moving a project between folders does not
+conflict with someone editing its contents, so the optimistic-concurrency guard would only
+produce false conflicts. A test asserts the project JSON is byte-for-byte unchanged after a
+re-file — a move that quietly rewrote a composition would be far worse than one that failed.
+
+Six tests, mutation-tested four ways: not reporting an unknown project fails 1, skipping
+normalisation fails 2, not bumping `updated_at` fails 6, writing the wrong column fails 4.
+
+### One control, not two
+
+`FolderPicker` is a text input backed by a `<datalist>` — a native combobox, so the dropdown
+offers what exists and anything typed is a new folder. A `<select>` plus a separate "new
+folder" field would make reuse and invention look equally heavy and need a mode switch. The
+default folder is filtered out of the options: it is a presentation of "no folder", not
+somewhere to file into, and clearing the field already does that.
+
+### The endpoint finally has a caller, and it is provably the source
+
+`GET /projects/folders` had **two** wrappers and zero call sites — `listServerProjectFolders`
+in the editor and `service.listProjectFolders` in the MCP server, neither ever invoked.
+(`?folder=` was never dead, though: MCP's `list_projects` passes it. An earlier note in this
+session called both dead; only the folders endpoint was.)
+
+The pickers are now fed by it rather than by folders derived from the loaded projects, which
+matters because the two only agree by coincidence. Proved rather than asserted: the
+verification intercepts that response and injects a folder no project is in, then checks it
+appears in the picker and does NOT appear as a grouped section.
+
+### Verification
+
+All five, in a real browser, plus the server-side filter as a cross-check.
+
+| | result |
+|---|---|
+| 1. save into an existing folder | the PUT carried `folder: "Existing Client"`, and the server reports that folder for the id the app actually saved |
+| 2. save into a typed new folder | folder created, project in it, offered by the picker with no app reload, and `GET /projects/folders` agrees |
+| 3. re-file via the card's Move action | one `PUT .../folder` with body `{"folder":"Existing Client"}` and no project JSON; panel updates; survives a full reload |
+| 4. the picker's data source | an injected endpoint-only folder shows in the picker and not as a section |
+| 5. regression | grouping, per-folder counts, default sorting last, filter narrowing and clearing all still work; the server-side `?folder=` count matches the client-side filter exactly (6 vs 6) |
+
+28 assertions. Suites: render-service 32/32 (6 new), mcp-server 15/15, project-kit 27/27, web
+typecheck clean.
+
+### Three harness defects that looked like product bugs
+
+Worth recording, because each cost a run and the next UI test will meet them:
+
+- **An `aria-label` collision I created.** The save picker was labelled "Folder for the next
+  save", and the folder sections are labelled `Folder <name>` — so a selector for
+  `[aria-label^="Folder "]` found a phantom section called "for the next save", which skewed
+  five assertions. That was a real naming defect, not just a test problem: a screen-reader
+  user hearing "Folder for the next save" among "Folder Client Acme" has the same ambiguity.
+  Renamed to "Save into folder".
+- **The editor's project identity is still settling when the panel renders.** It restores its
+  autosaved project asynchronously, so `project.id` read just before a save is not
+  necessarily the id the save writes to — reading it earlier or later does not fix that. The
+  test now asserts against the id in the PUT the app itself issued, which is by definition
+  the project that was saved.
+- **Project names are not unique in this database.** Earlier stages left several projects
+  called `MCP-claude-test-2-MCP`, so a name-based "is it gone from Uncategorized" check fails
+  because a *different* project of that name is still there. Identity assertions go through
+  ids.
