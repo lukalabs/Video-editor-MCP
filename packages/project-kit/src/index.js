@@ -544,6 +544,32 @@ export function renameProject(project, { name }) {
   return { project: finish(next), name };
 }
 
+/**
+ * The canvas fill behind clips whose aspect differs from the project — a 16:9 packshot
+ * centred in a 1080x1920 project, say. "color" paints `layoutBackgroundColor`, "blur"
+ * paints a blurred cover-fit copy of the base clip, and "none" restores the default
+ * black bars. Both fields are part of the shared project JSON and are read by the
+ * preview and the export alike (core/src/video/video-engine.ts).
+ */
+export function setCanvasBackground(project, { mode = "color", color } = {}) {
+  if (!["color", "blur", "none"].includes(mode)) {
+    fail("INVALID_PARAMS", `mode must be "color", "blur" or "none" (got "${mode}")`);
+  }
+  if (mode === "color" && !/^#[0-9a-fA-F]{6}$/.test(String(color ?? ""))) {
+    fail("INVALID_PARAMS", `color must be a #rrggbb hex when mode is "color" (got "${color}")`);
+  }
+
+  const next = clone(project);
+  if (mode === "none") {
+    delete next.timeline.backgroundFillMode;
+    delete next.timeline.layoutBackgroundColor;
+  } else {
+    next.timeline.backgroundFillMode = mode;
+    if (mode === "color") next.timeline.layoutBackgroundColor = color;
+  }
+  return { project: finish(next), mode, ...(mode === "color" ? { color } : {}) };
+}
+
 /* ------------------------------------------------------------ op dispatch */
 
 /* --------------------------------------------------------------- subtitles */
@@ -672,6 +698,7 @@ export const OPERATIONS = {
   add_text_clip: addTextClip,
   add_transition: addTransition,
   rename_project: renameProject,
+  set_canvas_background: setCanvasBackground,
   set_subtitles: setSubtitles,
   add_subtitle: addSubtitle,
   remove_subtitle: removeSubtitle,

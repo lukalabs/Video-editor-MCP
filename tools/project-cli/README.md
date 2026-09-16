@@ -40,6 +40,7 @@ cli add-clip  draft.json --media storage/inbox/clip.mp4
 cli subtitles draft.json --cues cues.json --preset hormozi --layer
 cli component draft.json --component button --at -4 --props '{"label":"Create your Replika"}'
 cli text      draft.json --text "Meet Replika." --at -4 --duration 4
+cli background draft.json --color auto            # fill the letterbox bars
 cli serve     draft.json --open
 cli export    draft.json --out project.json   # raw JSON, if you need it
 ```
@@ -73,6 +74,33 @@ With `--props`, renders the component through `packages/component-library` first
 Chrome; no Redis or render-service). With `--file`, uses a `.webm` you already rendered.
 Either way it lands on a graphics track, and the clip keeps `componentId` and `props` in
 its metadata so it can be re-rendered later.
+
+### background
+
+A clip whose aspect does not match the project is centred and letterboxed — a 16:9
+packshot in a vertical 1080x1920 video sits in black bars. `background` fills those bars
+instead:
+
+```bash
+cli background draft.json --color auto        # copy the clip's own backdrop
+cli background draft.json --color "#f5f5f5"   # a colour you choose
+cli background draft.json --blur              # blurred cover-fit copy of the base clip
+cli background draft.json --none              # back to black bars
+```
+
+`auto` samples the four corners of the bottom-most video clip at its midpoint. On a
+packshot or title card all four read the same flat backdrop, which is the evidence there
+is a colour worth copying; when they disagree the corners carry picture, so the command
+prints what it found and uses the most common one. Pass a hex to decide yourself.
+
+`add-clip` takes the same values as `--backdrop`, so the usual case is one command:
+
+```bash
+cli add-clip draft.json --media storage/media/logo-with-wordmark.mp4 --backdrop auto
+```
+
+Both write `timeline.backgroundFillMode` and `timeline.layoutBackgroundColor`, which the
+editor's preview and its exporter already paint (`core/src/video/video-engine.ts`).
 
 ## Captions: layer or overlay
 
@@ -159,7 +187,8 @@ already done so.
 ## Operations behind it
 
 The subtitle side is `set_subtitles`, `add_subtitle` and `remove_subtitle` in
-`packages/project-kit`, alongside the existing clip, text and transition ops. They are
+`packages/project-kit`; the canvas fill is `set_canvas_background`. Both sit alongside
+the existing clip, text and transition ops. They are
 available over `POST /projects/:id/ops` too, for driving the render-service copy of a
 project rather than a file.
 

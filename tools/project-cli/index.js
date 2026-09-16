@@ -11,6 +11,7 @@
  *   project-cli subtitles draft.json --cues cues.json --preset hormozi
  *   project-cli component draft.json --component button --props '{...}' --at -4
  *   project-cli text      draft.json --text "Meet Replika." --at -4 --duration 4
+ *   project-cli background draft.json --color auto
  *   project-cli export    draft.json --out project.json
  */
 import { execFileSync } from "node:child_process";
@@ -24,6 +25,7 @@ import {
   addTextClip,
   addTrack,
   createProject,
+  setCanvasBackground,
   setSubtitles,
   ProjectKitError,
 } from "../../packages/project-kit/src/index.js";
@@ -189,8 +191,14 @@ function cmdAddClip(path, args) {
     ...(args.duration ? { duration: Number(args.duration) } : {}),
   });
 
-  writeProject(path, keepFootageAtBack(updated));
+  project = keepFootageAtBack(updated);
+  if (args.backdrop) {
+    project = applyBackdrop(project, args.backdrop, { file, duration: metadata.duration });
+  }
+
+  writeProject(path, project);
   console.log(`added clip ${clipId} (${metadata.width}x${metadata.height}, ${metadata.duration.toFixed(2)}s)`);
+  if (args.backdrop) console.log(`background: ${describeBackdrop(project)}`);
 }
 
 function cmdSubtitles(path, args) {
@@ -385,9 +393,94 @@ function cmdServe(path, args) {
   if (args.open) execFileSync("open", [url]);
 }
 
+/**
+ * Fills the letterbox bars around a clip that does not match the project's aspect —
+ * the usual case being a 16:9 packshot centred in a vertical 1080x1920 video, which
+ * otherwise sits in black. `--color auto` copies the clip's own backdrop.
+ */
+function cmdBackground(path, args) {
+  const value = args.blur ? "blur"
+    : args.none ? "none"
+    : args.color ?? die('--color <auto|#rrggbb>, --blur or --none is required');
+
+  const project = applyBackdrop(readProject(path), value);
+  writeProject(path, project);
+  console.log(`background: ${describeBackdrop(project)}`);
+}
+
 /** add-clip and component stash the absolute path in metadata so serve can copy the file. */
 function findSourcePath(item) {
   return item.metadata?.__path ?? null;
+}
+
+/**
+ * A clip's own background colour, for filling the letterbox bars with something other
+ * than black. Samples the four corners at the clip's midpoint: on a packshot or title
+ * card they all read the same flat backdrop, and that agreement is the evidence there
+ * is a background colour to copy at all. Disagreement means the corners carry picture,
+ * so the choice is a guess and says so.
+ */
+function sampleBackgroundColor(file, duration) {
+  const at = duration > 0 ? duration / 2 : 0;
+  const corners = {
+    "top-left": "0:0",
+    "top-right": "iw-8:0",
+    "bottom-left": "0:ih-8",
+    "bottom-right": "iw-8:ih-8",
+  };
+
+  const seen = new Map();
+  for (const [name, xy] of Object.entries(corners)) {
+    const rgb = execFileSync(
+      "ffmpeg",
+      ["-v", "error", "-ss", String(at), "-i", file, "-frames:v", "1",
+       "-vf", `crop=8:8:${xy},scale=1:1`, "-f", "rawvideo", "-pix_fmt", "rgb24", "-"],
+    );
+    if (rgb.length < 3) die(`could not read a frame from ${basename(file)} at ${at.toFixed(2)}s`);
+    const hex = `#${rgb.subarray(0, 3).toString("hex")}`;
+    seen.set(hex, [...(seen.get(hex) ?? []), name]);
+  }
+
+  const ranked = [...seen.entries()].sort((a, b) => b[1].length - a[1].length);
+  const [hex, matching] = ranked[0];
+  if (matching.length < 4) {
+    console.warn(
+      `warning: corners disagree (${ranked.map(([h, c]) => `${h} x${c.length}`).join(", ")}) — ` +
+      `using ${hex}. Pass --color "#rrggbb" to choose yourself.`,
+    );
+  }
+  return hex;
+}
+
+/** The bottom-most video clip — the one the letterbox bars appear around. */
+function baseClipSource(project) {
+  const track = project.timeline.tracks.find((item) => item.type === "video" && !item.role);
+  const clip = [...(track?.clips ?? [])].sort((a, b) => a.startTime - b.startTime)[0];
+  if (!clip) die('auto needs a video clip in the project — add one first, or pass a #rrggbb hex');
+
+  const media = project.mediaLibrary.items.find((item) => item.id === clip.mediaId);
+  const file = media && findSourcePath(media);
+  if (!file || !existsSync(file)) {
+    die(`auto cannot find the source file for ${media?.name ?? clip.mediaId}`);
+  }
+  return { file, duration: media.metadata?.duration ?? 0 };
+}
+
+/** Shared by `background` and add-clip's --backdrop. Returns the updated project. */
+function applyBackdrop(project, value, sampleFrom) {
+  if (value === "none") return setCanvasBackground(project, { mode: "none" }).project;
+  if (value === "blur") return setCanvasBackground(project, { mode: "blur" }).project;
+
+  const isAuto = value === true || value === "auto";
+  const source = isAuto ? (sampleFrom ?? baseClipSource(project)) : null;
+  const color = isAuto ? sampleBackgroundColor(source.file, source.duration) : String(value);
+  return setCanvasBackground(project, { mode: "color", color }).project;
+}
+
+function describeBackdrop(project) {
+  const { backgroundFillMode: mode, layoutBackgroundColor: color } = project.timeline;
+  if (!mode) return "black bars (default)";
+  return mode === "color" ? `color ${color}` : mode;
 }
 
 const COMMANDS = {
@@ -396,6 +489,7 @@ const COMMANDS = {
   subtitles: cmdSubtitles,
   component: cmdComponent,
   text: cmdText,
+  background: cmdBackground,
   export: cmdExport,
   serve: cmdServe,
 };

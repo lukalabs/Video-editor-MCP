@@ -18,6 +18,7 @@ import {
   moveClip,
   removeClip,
   setAudioFade,
+  setCanvasBackground,
   removeSubtitle,
   setEffect,
   setSubtitles,
@@ -438,4 +439,33 @@ test("subtitle ops are reachable through applyOps", () => {
   ]);
   assert.equal(project.timeline.subtitles.length, 2);
   assert.equal(project.timeline.subtitles[0].animationStyle, "karaoke");
+});
+
+test("setCanvasBackground paints a colour behind letterboxed clips, and clears it again", () => {
+  const project = createProject({ width: 1080, height: 1920 });
+
+  const filled = setCanvasBackground(project, { mode: "color", color: "#f5f5f5" }).project;
+  assert.equal(filled.timeline.backgroundFillMode, "color");
+  assert.equal(filled.timeline.layoutBackgroundColor, "#f5f5f5");
+
+  const blurred = setCanvasBackground(filled, { mode: "blur" }).project;
+  assert.equal(blurred.timeline.backgroundFillMode, "blur");
+
+  const cleared = setCanvasBackground(blurred, { mode: "none" }).project;
+  assert.equal(cleared.timeline.backgroundFillMode, undefined);
+  assert.equal(cleared.timeline.layoutBackgroundColor, undefined);
+});
+
+test("setCanvasBackground rejects a mode it cannot paint and a colour it cannot read", () => {
+  const project = createProject();
+  expectCode(() => setCanvasBackground(project, { mode: "rainbow" }), "INVALID_PARAMS");
+  expectCode(() => setCanvasBackground(project, { mode: "color", color: "f5f5f5" }), "INVALID_PARAMS");
+  expectCode(() => setCanvasBackground(project, { mode: "color" }), "INVALID_PARAMS");
+});
+
+test("set_canvas_background is reachable through applyOps", () => {
+  const { project } = applyOps(createProject({ width: 1080, height: 1920 }), [
+    { op: "set_canvas_background", mode: "color", color: "#102030" },
+  ]);
+  assert.equal(project.timeline.layoutBackgroundColor, "#102030");
 });
