@@ -127,10 +127,25 @@ function resolveTime(value, project) {
   return time < 0 ? Math.max(0, project.timeline.duration + time) : time;
 }
 
-function trackOfType(project, type, name) {
-  const existing = project.timeline.tracks.find((track) => track.type === type);
+/**
+ * The timeline stores the front-most track at index 0 (see getVisibleTrackRenderOrder),
+ * so footage has to sit last or it paints over the captions and graphics above it.
+ */
+function keepFootageAtBack(project) {
+  const isFootage = (track) => track.type === "video" && !track.role;
+  const overlays = project.timeline.tracks.filter((track) => !isFootage(track));
+  const footage = project.timeline.tracks.filter(isFootage);
+  return { ...project, timeline: { ...project.timeline, tracks: [...overlays, ...footage] } };
+}
+
+function trackOfType(project, type, name, role) {
+  const existing = project.timeline.tracks.find(
+    (track) => (role ? track.role === role : track.type === type && !track.role),
+  );
   if (existing) return { project, trackId: existing.id };
-  return addTrack(project, { name, type });
+
+  const created = addTrack(project, { name, type, ...(role ? { role, mode: "standard" } : {}) });
+  return { project: keepFootageAtBack(created.project), trackId: created.trackId };
 }
 
 /* ----------------------------------------------------------------- commands */
@@ -174,7 +189,7 @@ function cmdAddClip(path, args) {
     ...(args.duration ? { duration: Number(args.duration) } : {}),
   });
 
-  writeProject(path, updated);
+  writeProject(path, keepFootageAtBack(updated));
   console.log(`added clip ${clipId} (${metadata.width}x${metadata.height}, ${metadata.duration.toFixed(2)}s)`);
 }
 
@@ -193,6 +208,48 @@ function cmdSubtitles(path, args) {
   );
 
   const style = scalePreset(preset, project.settings.width);
+
+  if (args.layer) {
+    // The editor's own caption feature puts one text clip per cue on a track marked
+    // role "captions", which is what makes them a draggable layer. Overlay subtitles
+    // animate per word but never appear on the timeline; these are the trade-off.
+    let working = project;
+    const existing = working.timeline.tracks.find(
+      (track) => track.role === "captions" || track.name === "Captions",
+    );
+    let trackId = existing?.id;
+    if (!trackId) {
+      const created = trackOfType(working, "video", "Captions", "captions");
+      working = created.project;
+      trackId = created.trackId;
+    }
+
+    for (const cue of cues) {
+      ({ project: working } = addTextClip(working, {
+        trackId,
+        text: cue.text,
+        startTime: cue.startTime,
+        duration: Math.max(0.1, cue.endTime - cue.startTime),
+        style: {
+          fontFamily: style.fontFamily,
+          fontSize: style.fontSize,
+          color: style.color,
+          ...(style.backgroundColor && style.backgroundColor !== "rgba(0,0,0,0)"
+            ? { backgroundColor: style.backgroundColor }
+            : {}),
+          ...(style.outlineColor ? { strokeColor: style.outlineColor } : {}),
+          ...(style.outlineWidth ? { strokeWidth: style.outlineWidth } : {}),
+        },
+        transform: { position: { x: 0.5, y: style.verticalAnchor ?? 0.74 } },
+        metadata: { captionSource: "project-cli", captionPreset: presetName },
+      }));
+    }
+
+    writeProject(path, working);
+    console.log(`added ${cues.length} caption clips on a Captions track — ${preset.label}`);
+    return;
+  }
+
   const { project: updated, subtitleCount } = setSubtitles(project, {
     subtitles: cues,
     style,
@@ -200,7 +257,7 @@ function cmdSubtitles(path, args) {
   });
 
   writeProject(path, updated);
-  console.log(`set ${subtitleCount} subtitles — ${preset.label}`);
+  console.log(`set ${subtitleCount} subtitles — ${preset.label} (overlay; use --layer for clips)`);
 }
 
 function cmdComponent(path, args) {

@@ -37,7 +37,7 @@ cli() { node tools/project-cli/index.js "$@"; }   # a function, not a variable: 
 
 cli new       draft.json --size 1080x1920 --fps 24 --name "s2 ad"
 cli add-clip  draft.json --media storage/inbox/clip.mp4
-cli subtitles draft.json --cues cues.json --preset hormozi
+cli subtitles draft.json --cues cues.json --preset hormozi --layer
 cli component draft.json --component button --at -4 --props '{"label":"Create your Replika"}'
 cli text      draft.json --text "Meet Replika." --at -4 --duration 4
 cli serve     draft.json --open
@@ -74,37 +74,87 @@ Chrome; no Redis or render-service). With `--file`, uses a `.webm` you already r
 Either way it lands on a graphics track, and the clip keeps `componentId` and `props` in
 its metadata so it can be re-rendered later.
 
-## Captions are not a timeline track
+## Captions: layer or overlay
 
-This editor has no subtitle track — track types are only video, audio, image, text and
-graphics. Subtitles live in `timeline.subtitles` and render as an overlay above every
-track, so they will not appear as a row on the timeline.
+Two ways to put captions in a project, and they are not interchangeable.
 
-To edit them: **select the video clip ▸ Inspector ▸ AI tab**, which lists every cue with
-its text and timing. That is also where the style and animation apply, to all cues at once.
+`--layer` is the one to reach for. It follows the editor's own caption feature: a track
+named **Captions** (`role: "captions"`) holding one text clip per cue. Each caption is a
+real clip you can drag, trim and restyle, and the editor lights up its native
+"Select all captions" control.
 
-If you would rather have one draggable clip per caption, use `text` instead of `subtitles`
-— but each is then styled separately and word-by-word animation is lost.
+Without `--layer` the cues go into `timeline.subtitles`, an overlay drawn above every
+track. That path keeps per-word animation — karaoke, bounce, word-highlight — but never
+appears on the timeline, and is edited from **Inspector ▸ AI tab** instead.
 
-## Worked example
+| | `--layer` | overlay (default) |
+|---|---|---|
+| Row on the timeline | yes, one clip per cue | no |
+| Drag / trim one cue | yes | no |
+| Word-by-word animation | no, static text | yes |
+| Restyle every cue at once | no, per clip | yes |
+
+There is no way to have both: the animation is drawn by the subtitle renderer, which only
+reads `timeline.subtitles`.
+
+## Track order is z-order
+
+The timeline stores **the front-most track at index 0** (see `getVisibleTrackRenderOrder`
+in core). Footage therefore has to sit last, or it paints over the captions and graphics
+that are supposed to be above it — they vanish on export.
+
+The CLI enforces this: any video track without a role is pushed to the back whenever a
+track is added, giving
+
+```
+0  Captions    <- front
+1  Graphics
+2  Text
+3  Video 1     <- back
+```
+
+## The whole recipe
+
+From a raw clip to an editable project with captions, a button and a title.
 
 ```bash
+cd Video-editor-MCP
 cli() { node tools/project-cli/index.js "$@"; }
 W=storage/caption-work
+CLIP=storage/inbox/my-clip.mp4
+NAME=my-clip
 
-cli new       $W/s1.json --size 1080x1920 --fps 24 --name "s1 alt"
-cli add-clip  $W/s1.json --media storage/inbox/s1-alt-single-take.mp4
-cli subtitles $W/s1.json --cues $W/cues/s1-alt-single-take-cues.json --preset clean
-cli component $W/s1.json --component button --at -4 \
+# 1. Word-level transcription, then group the words into short cues.
+mkdir -p $W/audio $W/cues
+ffmpeg -v error -y -i $CLIP -vn -ac 1 -ar 16000 -c:a pcm_s16le $W/audio/$NAME.wav
+$W/venv/bin/python tools/short-form-captions/transcribe.py \
+  $W/audio/$NAME.wav $W/cues/$NAME-words.json
+python3 tools/short-form-captions/build_cues.py \
+  $W/cues/$NAME-words.json $W/cues/$NAME-cues.json
+
+# 2. Build the project. Order does not matter; footage always sorts to the back.
+cli new       $W/$NAME.json --size 1080x1920 --fps 24 --name "$NAME"
+cli add-clip  $W/$NAME.json --media $CLIP
+cli subtitles $W/$NAME.json --cues $W/cues/$NAME-cues.json --preset bounce --layer
+cli component $W/$NAME.json --component button --at -4 \
   --props '{"label":"Create your Replika","fillColor":"#ffffff","textColor":"#141422",
             "width":640,"height":132,"cornerRadius":66,"fontSize":46,"shadow":true,
             "positionY":0.87,"holdToEnd":true,"animation":"slideUp","easing":"soft",
             "slideSeconds":0.8,"durationInSeconds":4}'
-cli serve     $W/s1.json --open        # prints the URL and opens it
+cli text      $W/$NAME.json --text "Make it personal." --at -4 --duration 4 \
+  --style '{"fontFamily":"Poppins","fontSize":88,"color":"#ff7a1a","fontWeight":800}' \
+  --transform '{"position":{"x":0.5,"y":0.16}}'
+
+# 3. Hand it to the editor. Start it first: cd apps/editor && pnpm dev
+cli serve $W/$NAME.json --open
 ```
 
-Produces a 28.5s project: the clip on a video track, 32 word-timed captions, and the button
-on a graphics track starting at 24.47s.
+The result opens with four layers — Captions, Graphics, Text, Video — every asset loaded,
+and nothing burned into the pixels.
+
+The first transcription downloads the Whisper `large-v3` weights (~3 GB, cached in
+`~/.cache/huggingface`) and creates the venv if `tools/short-form-captions/run.sh` has not
+already done so.
 
 ## Operations behind it
 

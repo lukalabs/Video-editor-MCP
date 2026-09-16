@@ -196,11 +196,18 @@ export function createProject({ name = "Untitled", width = 1920, height = 1080, 
 
 /* -------------------------------------------------------------- operations */
 
-export function addTrack(project, { name, type = "video" } = {}) {
+/**
+ * `role` is the track's editorial meaning. "captions" is the one the editor acts on: its
+ * own caption feature puts one text clip per cue on a track marked that way, which is what
+ * makes captions a draggable layer rather than an overlay.
+ */
+export function addTrack(project, { name, type = "video", role, mode } = {}) {
   const next = clone(project);
   const track = {
     id: `track-${randomUUID()}`,
     type,
+    ...(role ? { role } : {}),
+    ...(mode ? { mode } : {}),
     name: name ?? `Video ${next.timeline.tracks.length + 1}`,
     clips: [],
     transitions: [],
@@ -471,7 +478,7 @@ export function setAudioFade(project, { clipId, fadeInSeconds, fadeOutSeconds })
  * editor loads them into its title engine, and they render in the export.
  */
 export function addTextClip(project, {
-  trackId, text, startTime = 0, duration = 3, style = {}, transform = {},
+  trackId, text, startTime = 0, duration = 3, style = {}, transform = {}, metadata,
 }) {
   requireTrack(project, trackId);
   if (typeof text !== "string" || !text) fail("INVALID_PARAMS", "text is required");
@@ -484,6 +491,7 @@ export function addTextClip(project, {
     duration: requireFiniteNumber(duration, "duration", { min: 0.001 }),
     text,
     style: { ...DEFAULT_TEXT_STYLE, ...clone(style) },
+    ...(metadata ? { metadata: clone(metadata) } : {}),
     transform: {
       position: { x: 0.5, y: 0.5 },
       scale: { x: 1, y: 1 },
