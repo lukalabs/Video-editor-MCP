@@ -10,15 +10,25 @@ back a finished MP4. Use that one to ship a file; use this one when you want to 
 ## How it reaches the editor
 
 Each command reads a project JSON, changes it, and writes it back, so a whole video is a
-shell script. `export` wraps the result in the envelope the editor's importer expects:
+shell script. `serve` then hands it to the editor:
 
 ```
-project-cli … → draft.json → export → project.json → editor ▸ Project JSON ▸ Import
+project-cli … → draft.json → serve → a URL that opens the project, media and all
 ```
 
-The editor keeps its projects in the browser, so there is no live sync — the JSON is the
-handover. The format is `packages/project-kit`'s, which already matches the editor's
-schema (1.2.0).
+`serve` copies the project and every file it references into the dev server's public
+folder and prints a link:
+
+```
+http://localhost:5173/#/editor?open=<project>&media=<folder>
+```
+
+`open=` loads and validates the project; `media=` lets the editor fetch each file by name,
+so it opens ready to play with no relinking. Both are handled in `App.tsx`.
+
+Use `export` instead if you want the raw `{version, project}` JSON for something else — but
+note the editor's own **Project JSON ▸ Import** dialog takes a *file*, not pasted text, and
+`serve` is the easier route.
 
 ## Commands
 
@@ -30,7 +40,8 @@ cli add-clip  draft.json --media storage/inbox/clip.mp4
 cli subtitles draft.json --cues cues.json --preset hormozi
 cli component draft.json --component button --at -4 --props '{"label":"Create your Replika"}'
 cli text      draft.json --text "Meet Replika." --at -4 --duration 4
-cli export    draft.json --out project.json
+cli serve     draft.json --open
+cli export    draft.json --out project.json   # raw JSON, if you need it
 ```
 
 `--at` accepts a negative number to count back from the end, so `--at -4` is "the last four
@@ -63,15 +74,17 @@ Chrome; no Redis or render-service). With `--file`, uses a `.webm` you already r
 Either way it lands on a graphics track, and the clip keeps `componentId` and `props` in
 its metadata so it can be re-rendered later.
 
-## After importing
+## Captions are not a timeline track
 
-The editor will say **"2 assets need replacement"**. That is expected and not an error: a
-browser cannot open a file path, so the video itself has to be handed over once. Go to the
-**Assets panel ▸ Relink from Folder** and pick the folder holding the media.
+This editor has no subtitle track — track types are only video, audio, image, text and
+graphics. Subtitles live in `timeline.subtitles` and render as an overlay above every
+track, so they will not appear as a row on the timeline.
 
-Relinking matches on file **name and size**, which is why `sourceFile` carries both — a
-plain path would never match. Keep the media where it was when the project was built, or
-copy it all into one folder first.
+To edit them: **select the video clip ▸ Inspector ▸ AI tab**, which lists every cue with
+its text and timing. That is also where the style and animation apply, to all cues at once.
+
+If you would rather have one draggable clip per caption, use `text` instead of `subtitles`
+— but each is then styled separately and word-by-word animation is lost.
 
 ## Worked example
 
@@ -87,7 +100,7 @@ cli component $W/s1.json --component button --at -4 \
             "width":640,"height":132,"cornerRadius":66,"fontSize":46,"shadow":true,
             "positionY":0.87,"holdToEnd":true,"animation":"slideUp","easing":"soft",
             "slideSeconds":0.8,"durationInSeconds":4}'
-cli export    $W/s1.json --out $W/s1.project.json
+cli serve     $W/s1.json --open        # prints the URL and opens it
 ```
 
 Produces a 28.5s project: the clip on a video track, 32 word-timed captions, and the button

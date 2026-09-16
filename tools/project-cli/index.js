@@ -14,7 +14,7 @@
  *   project-cli export    draft.json --out project.json
  */
 import { execFileSync } from "node:child_process";
-import { statSync, existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { copyFileSync, statSync, existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { basename, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -152,7 +152,7 @@ function cmdNew(path, args) {
 function cmdAddClip(path, args) {
   if (!args.media) die("--media <file> is required");
   const file = resolve(args.media);
-  const metadata = probe(file);
+  const metadata = { ...probe(file), __path: file };
 
   let project = readProject(path);
   const mediaId = args.id ?? `media-${basename(file).replace(/\W+/g, "-")}`;
@@ -227,7 +227,7 @@ function cmdComponent(path, args) {
     file = out;
   }
 
-  const metadata = probe(file);
+  const metadata = { ...probe(file), __path: file };
   const mediaId = `media-${basename(file).replace(/\W+/g, "-")}`;
   ({ project } = addMediaItem(project, {
     id: mediaId,
@@ -288,6 +288,51 @@ function cmdExport(path, args) {
   console.log("Open the editor -> Project JSON -> Import, and paste this file's contents.");
 }
 
+/**
+ * Copies the project and every file it references into the dev server's public folder and
+ * prints the URL that opens it. The editor fetches the media by name from `media=`, so the
+ * project opens ready to play rather than asking for a manual relink.
+ */
+function cmdServe(path, args) {
+  const project = readProject(path);
+  const webRoot = `${REPO}/apps/editor/apps/web/public`;
+  const slug = basename(path, ".json");
+  const projectDir = `${webRoot}/cli-projects`;
+  const mediaDir = `${projectDir}/${slug}-media`;
+
+  mkdirSync(mediaDir, { recursive: true });
+
+  for (const item of project.mediaLibrary.items) {
+    const source = findSourcePath(item);
+    if (!source || !existsSync(source)) {
+      console.warn(`  ! could not find ${item.name} — it will need relinking`);
+      continue;
+    }
+    copyFileSync(source, `${mediaDir}/${item.sourceFile?.name ?? item.name}`);
+  }
+
+  writeFileSync(`${projectDir}/${slug}.project.json`, JSON.stringify({
+    version: SCHEMA_VERSION,
+    ...(project.minimumReaderVersion ? { minimumReaderVersion: project.minimumReaderVersion } : {}),
+    ...(project.capabilities ? { capabilities: project.capabilities } : {}),
+    project,
+  }, null, 2));
+
+  const host = args.host ?? "http://localhost:5173";
+  const url =
+    `${host}/#/editor` +
+    `?open=/cli-projects/${slug}.project.json` +
+    `&media=/cli-projects/${slug}-media`;
+
+  console.log(url);
+  if (args.open) execFileSync("open", [url]);
+}
+
+/** add-clip and component stash the absolute path in metadata so serve can copy the file. */
+function findSourcePath(item) {
+  return item.metadata?.__path ?? null;
+}
+
 const COMMANDS = {
   new: cmdNew,
   "add-clip": cmdAddClip,
@@ -295,6 +340,7 @@ const COMMANDS = {
   component: cmdComponent,
   text: cmdText,
   export: cmdExport,
+  serve: cmdServe,
 };
 
 /* --------------------------------------------------------------------- main */

@@ -67,3 +67,16 @@ test("every preset names an animation the renderer implements", () => {
     assert.ok(preset.style.fontFamily, `${name} names a font family`);
   }
 });
+
+test("every animated preset names its own highlight colour", () => {
+  // The renderer falls back to yellow for an active word, so a preset that animates
+  // words must say what colour it wants or the yellow leaks through.
+  const animatesWords = ["word-highlight", "word-by-word", "karaoke", "bounce"];
+  for (const [name, preset] of Object.entries(CAPTION_PRESETS)) {
+    if (!animatesWords.includes(preset.animationStyle)) continue;
+    assert.ok(
+      preset.style.highlightColor,
+      `${name} animates words, so it must set highlightColor`,
+    );
+  }
+});

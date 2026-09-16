@@ -51,6 +51,8 @@ export const CAPTION_PRESETS = {
       fontWeight: "900",
       fontSize: 74,
       color: "#ffffff",
+      // Without this the renderer tints the spoken word its default yellow.
+      highlightColor: "#ffffff",
       backgroundColor: "rgba(0,0,0,0)",
       position: "bottom",
       verticalAnchor: 0.74,
@@ -69,6 +71,7 @@ export const CAPTION_PRESETS = {
       fontWeight: "900",
       fontSize: 60,
       color: "#ffffff",
+      highlightColor: "#ffffff",
       backgroundColor: "rgba(0,0,0,0.82)",
       position: "bottom",
       verticalAnchor: 0.74,
