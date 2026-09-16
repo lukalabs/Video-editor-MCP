@@ -42,6 +42,10 @@ At the prompt you can also type `720p` / `1080p` / `480p` to change resolution,
 `clip <path>` to edit a clip you already have instead of rendering one (free),
 `clip` on its own to go back to rendering, `again` to repeat, or `help`.
 
+Each finished project opens in the editor on its own — the `start` session always
+passes `--open`. Use `orchestrate make … --no-serve` when you want the files
+without a browser window.
+
 `orchestrate stop` shuts the servers down. They keep running after `quit`, which
 is usually what you want.
 

@@ -35,6 +35,8 @@ const HELP = `
     again                 re-run the last prompt
     help                  this
     quit                  stop asking (the servers keep running; "orch stop" ends them)
+
+  Each finished project opens in the editor by itself.
 `;
 
 /**
@@ -128,7 +130,8 @@ export async function runSession(flags) {
       log("");
       runId = await runMake(prompt, {
         ...flags, resolution, media,
-        dryRun: !media, spend: false, serve: Boolean(media),
+        // A finished project opens in the editor. A dry run has nothing to open.
+        dryRun: !media, spend: false, serve: Boolean(media), open: Boolean(media),
       });
     } catch (error) {
       log(`\n  stopped: ${error.message}`);
@@ -146,7 +149,9 @@ export async function runSession(flags) {
       continue;
     }
     try {
-      await runResume(runId, { ...flags, resolution, media: null, spend: true, dryRun: false });
+      await runResume(runId, {
+        ...flags, resolution, media: null, spend: true, dryRun: false, serve: true, open: true,
+      });
     } catch (error) {
       log(`\n  stopped: ${error.message}`);
       if (error.hint) log(`          ${error.hint}`);
