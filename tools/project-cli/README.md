@@ -23,14 +23,14 @@ schema (1.2.0).
 ## Commands
 
 ```bash
-CLI="node tools/project-cli/index.js"
+cli() { node tools/project-cli/index.js "$@"; }   # a function, not a variable: zsh does not split those
 
-$CLI new       draft.json --size 1080x1920 --fps 24 --name "s2 ad"
-$CLI add-clip  draft.json --media storage/inbox/clip.mp4
-$CLI subtitles draft.json --cues cues.json --preset hormozi
-$CLI component draft.json --component button --at -4 --props '{"label":"Create your Replika"}'
-$CLI text      draft.json --text "Meet Replika." --at -4 --duration 4
-$CLI export    draft.json --out project.json
+cli new       draft.json --size 1080x1920 --fps 24 --name "s2 ad"
+cli add-clip  draft.json --media storage/inbox/clip.mp4
+cli subtitles draft.json --cues cues.json --preset hormozi
+cli component draft.json --component button --at -4 --props '{"label":"Create your Replika"}'
+cli text      draft.json --text "Meet Replika." --at -4 --duration 4
+cli export    draft.json --out project.json
 ```
 
 `--at` accepts a negative number to count back from the end, so `--at -4` is "the last four
@@ -76,18 +76,18 @@ copy it all into one folder first.
 ## Worked example
 
 ```bash
-CLI="node tools/project-cli/index.js"
+cli() { node tools/project-cli/index.js "$@"; }
 W=storage/caption-work
 
-$CLI new       $W/s1.json --size 1080x1920 --fps 24 --name "s1 alt"
-$CLI add-clip  $W/s1.json --media storage/inbox/s1-alt-single-take.mp4
-$CLI subtitles $W/s1.json --cues $W/cues/s1-alt-single-take-cues.json --preset clean
-$CLI component $W/s1.json --component button --at -4 \
+cli new       $W/s1.json --size 1080x1920 --fps 24 --name "s1 alt"
+cli add-clip  $W/s1.json --media storage/inbox/s1-alt-single-take.mp4
+cli subtitles $W/s1.json --cues $W/cues/s1-alt-single-take-cues.json --preset clean
+cli component $W/s1.json --component button --at -4 \
   --props '{"label":"Create your Replika","fillColor":"#ffffff","textColor":"#141422",
             "width":640,"height":132,"cornerRadius":66,"fontSize":46,"shadow":true,
             "positionY":0.87,"holdToEnd":true,"animation":"slideUp","easing":"soft",
             "slideSeconds":0.8,"durationInSeconds":4}'
-$CLI export    $W/s1.json --out $W/s1.project.json
+cli export    $W/s1.json --out $W/s1.project.json
 ```
 
 Produces a 28.5s project: the clip on a video track, 32 word-timed captions, and the button
