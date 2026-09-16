@@ -26,3 +26,6 @@ storage/caption-work/
 storage/captioned/
 storage/final/
 apps/editor/apps/web/public/cli-projects/
+
+# Orchestrator runs: screenshots, paid renders, transcripts and drafts.
+storage/orchestrate/

@@ -1,0 +1,10 @@
+{
+  "name": "@video-editor/orchestrate",
+  "version": "0.1.0",
+  "private": true,
+  "description": "One prompt to an editable project, across ui-snap, ugc-farm and project-cli",
+  "license": "MIT",
+  "type": "module",
+  "bin": { "orchestrate": "index.js" },
+  "scripts": { "test": "node --test test/*.test.js" }
+}
