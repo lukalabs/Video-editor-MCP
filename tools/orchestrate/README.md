@@ -41,7 +41,7 @@ orchestrate doctor                      # is everything this needs running?
 | `--only <step,…>` | all | run part of the chain |
 | `--captions overlay\|layer\|none` | `overlay` | see *Captions*, below |
 | `--preset <name>` | from the prompt | `hormozi`, `clean`, `bounce`, `boxed`, `highlight-box` |
-| `--resolution 480p\|720p\|1080p` | `720p` | 1080p is 10-bit HEVC, which the browser editor may not decode |
+| `--resolution 480p\|720p\|1080p` | `1080p` | 1080p comes back as 10-bit HEVC — see below |
 | `--size` / `--fps` | `1080x1920` / `30` | the canvas |
 | `--button-lead <s>` | from the prompt | how long the CTA is on screen |
 | `--flatten-color <#hex>` | `#16181D` | what the screenshot's transparency is painted onto |
@@ -94,6 +94,21 @@ reading once.
 The other half of the same rule: the script field is spoken words only. ugc-farm
 counts the words in it to decide how many parts the video splits into, and every
 part is a separate paid render, so a stage direction in there costs money.
+
+## About 1080p
+
+The default. Seedance returns 1080p as **10-bit HEVC** (`hvc1`, `yuv420p10le`)
+rather than H.264, which is worth knowing in two places:
+
+- The browser editor decodes it here — checked against this machine's Chrome with
+  `VideoDecoder.isConfigSupported` — and exports fine to H.264. If a clip ever
+  loads as audio-only or refuses to scrub, that is the first thing to suspect.
+- It is roughly 2x the file of 720p for the same seconds, and the render bills by
+  output seconds at about 48,700 tokens per second at 1080p against 21,600 at
+  720p, so it is also more than twice the cost.
+
+`--resolution 720p` while you are iterating on framing, wording or the screen in
+the shot; the default when the take is the one you are keeping.
 
 ## Money
 

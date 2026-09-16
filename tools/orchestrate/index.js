@@ -76,7 +76,7 @@ export function readFlags(args) {
     only,
     captions: pick(args.captions, CAPTION_MODES, "overlay", "captions"),
     preset: String(args.preset === undefined || args.preset === true ? "hormozi" : args.preset),
-    resolution: pick(args.resolution, RESOLUTIONS, "720p", "resolution"),
+    resolution: pick(args.resolution, RESOLUTIONS, "1080p", "resolution"),
     width,
     height,
     fps: Number(args.fps ?? 30),
@@ -126,7 +126,13 @@ async function cmdPlan(args) {
   console.log(JSON.stringify(plan, null, 2));
 }
 
+/** A prompt piped in, if there is one.
+ *
+ *  Guarded by isTTY: reading fd 0 from an interactive terminal blocks forever, so
+ *  `orchestrate make` with no argument would sit there looking like a hang rather
+ *  than printing what it wanted. */
 function readStdin() {
+  if (process.stdin.isTTY) return "";
   try {
     return readFileSync(0, "utf8").trim();
   } catch {
