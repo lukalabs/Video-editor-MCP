@@ -1,7 +1,7 @@
 {
   "id": "stat-counter",
   "name": "Stat Counter",
-  "description": "A number counts up to its target above a labelled accent rule.",
+  "description": "Animated count-up number with label",
   "project": "src/projects/stat-counter.ts",
   "durationParam": "durationInSeconds",
   "params": [

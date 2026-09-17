@@ -1,7 +1,7 @@
 {
   "id": "chat-thread-Rep",
   "name": "Chat Thread Rep",
-  "description": "A Replika conversation playing out bubble by bubble, with typing dots timed to each reply's word count, then leaving as a staggered wave. Renders 9:16 (1080x1920) with a transparent background. Text renders in DM Sans, a metric-matched stand-in for the licensed Pangea Text.",
+  "description": "Replika conversation with typing dots",
   "project": "src/projects/chat-thread-Rep.ts",
   "durationParam": "durationInSeconds",
   "defaultWidth": 1080,

@@ -1,7 +1,7 @@
 {
   "id": "chat-bubble-single-Rep",
   "name": "Chat Bubble Single Rep",
-  "description": "One Replika chat bubble arriving on the house 240ms ease-out and leaving on the same curve reversed, with the balloon Bezier silhouette. Renders 1:1 (1080x1080) with a transparent background. Text renders in DM Sans, a metric-matched stand-in for the licensed Pangea Text.",
+  "description": "One animated Replika chat bubble",
   "project": "src/projects/chat-bubble-single-Rep.ts",
   "durationParam": "durationInSeconds",
   "defaultWidth": 1080,

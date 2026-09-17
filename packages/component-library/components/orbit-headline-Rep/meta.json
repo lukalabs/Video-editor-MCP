@@ -1,7 +1,7 @@
 {
   "id": "orbit-headline-Rep",
   "name": "Orbit Headline Rep",
-  "description": "Parametric reconstruction of an After Effects headline: words scale in one after another and drift along shallow arcs under a slow group zoom, staying upright throughout. Curves are ported from the original Bodymovin export, so any duration keeps the source's timing character.",
+  "description": "Headline words scale in on arcs",
   "project": "src/projects/orbit-headline-Rep.ts",
   "durationParam": "durationInSeconds",
   "params": [

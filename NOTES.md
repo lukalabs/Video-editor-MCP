@@ -12,6 +12,14 @@ Standing rules that apply to future work, kept here so they survive between sess
   the two Stage 13/14 components in Stage 15. `stat-counter` keeps its original id: it is the
   only pre-`-Rep` component still in the library after Stage 16, and renaming it would break
   the projects and component_metadata rows that reference it.
+- **A component's `meta.json` `description` is one short sentence, about five words.** It is
+  a label, not documentation — "Replika conversation with typing dots", not a paragraph on
+  timing and fonts. It is the line the Component Library panel puts under the name and the
+  blurb `list_components` returns, and long ones wrapped to four or five lines in the panel.
+  Anything a caller actually needs — delimiters, prefixes, accepted values, aspect ratio —
+  belongs on the parameter it concerns (`description` / `lineHint`) or in the dimension
+  fields, which are read as data rather than skimmed as prose. All five descriptions were cut
+  to this length in one pass; per-param docs were deliberately left long.
 - **A component's directory name must equal its `meta.json` id.** `listComponents` throws on
   a mismatch, so a rename means moving the directory too. By convention the project and scene
   filenames match as well (`src/projects/<id>.ts`, `src/scenes/<id>.tsx`), and `meta.json`'s
