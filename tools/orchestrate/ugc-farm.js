@@ -108,12 +108,19 @@ export class Farm {
    * screen in it at all. And the upload clears the avatar approval on its way
    * through, so that approval has to come after, not before.
    */
-  async setScene(id, { screenPng, describes, useCreator = false }) {
+  async setScene(id, { screenPng, describes, useCreator = false, durationSeconds = 0 }) {
     // Only the toggles. A PATCH carrying script or action clears every approval
     // and re-plans from the top.
     await this.call("PATCH", `/api/projects/${id}`, { use_ui: Boolean(screenPng), use_creator: useCreator });
-    await this.call("POST", `/api/projects/${id}/plan`, { screen_in_shot: Boolean(screenPng), approve: true });
-    this.log("  plan approved");
+    // The length has to be set before the prompt is written, not before the render:
+    // the writer lays out its beats against it, and beats written for one length and
+    // rendered at another is the mismatch this whole field exists to close.
+    await this.call("POST", `/api/projects/${id}/plan`, {
+      screen_in_shot: Boolean(screenPng),
+      ...(durationSeconds ? { target_duration_s: durationSeconds } : {}),
+      approve: true,
+    });
+    this.log(durationSeconds ? `  plan approved — ${durationSeconds}s asked for` : "  plan approved");
 
     if (!screenPng) return;
     const { readFileSync } = await import("node:fs");

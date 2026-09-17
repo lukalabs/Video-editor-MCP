@@ -13,6 +13,7 @@ import { randomBytes } from "node:crypto";
 import { join, resolve } from "node:path";
 
 import { REPO, StepError, ffprobe, round, sampleCorners, servicesFor, sh, writeJson } from "./lib.js";
+import { briefLines, promptLines } from "./brief.js";
 import { Farm, partFile } from "./ugc-farm.js";
 import { findGeminiKey, makePlan, readTags } from "./plan.js";
 import { preflight, report, UGC_FARM, UGC_FARM_DIR, UI_SNAP } from "./preflight.js";
@@ -38,6 +39,28 @@ const save = (state) => {
   state.updatedAt = new Date().toISOString();
   writeJson(join(state.dir, "run.json"), { ...state, dir: undefined });
 };
+
+/**
+ * The daily cap, for the brief — best effort and never fatal.
+ *
+ * The brief is printed before preflight, deliberately: somebody should be able to
+ * read what a run would do without three servers being up first. So a service that
+ * is not answering yet just means the cap line is missing, not that the plan is.
+ */
+async function farmLimits(steps, flags) {
+  if (!steps.includes("ugc-farm") || flags.media) return null;
+  try {
+    const farm = new Farm({ baseUrl: UGC_FARM, password: process.env.UGC_FARM_PASSWORD ?? "", log: () => {} });
+    return await farm.limits();
+  } catch {
+    return null;
+  }
+}
+
+/** The length asked for: the flag first, then the prompt, then nothing. */
+function askedDuration(state, flags) {
+  return flags.duration || Number(state.plan?.ugc?.durationSeconds) || 0;
+}
 
 function loadRun(runId) {
   const dir = join(RUNS(), runId);
@@ -130,6 +153,7 @@ async function doUgcFarm(state, flags) {
     await farm.setScene(own.projectId, {
       screenPng: screen ? join(state.dir, screen) : "",
       describes: state.plan.ugc.screen_describes,
+      durationSeconds: askedDuration(state, flags),
     });
     save(state);
   } else {
@@ -176,6 +200,24 @@ async function doUgcFarm(state, flags) {
     log(`            ${dry.references.length} reference image(s)`);
   }
   log(`  review    ${UGC_FARM}/p/${own.projectId}`);
+
+  // The beats, before the render rather than after it. The payload above says what
+  // is being bought; this says what it will contain, which is the thing actually
+  // worth reading twice — a prompt can be a valid submission and still describe the
+  // wrong video.
+  const written = (await farm.project(own.projectId)).prompts ?? [];
+  const forSale = written.filter((entry) => missing.includes(entry.part));
+  if (forSale.length) {
+    log("");
+    log("  what the render will contain:");
+    for (const line of promptLines(forSale)) log(line);
+    const errors = forSale.reduce((total, entry) => total + (entry.errors ?? 0), 0);
+    if (errors) {
+      log("");
+      log(`  ! ${errors} unresolved error(s) in the prompt above.`);
+      log(`    read them at ${UGC_FARM}/p/${own.projectId} before paying for it.`);
+    }
+  }
   log("");
 
   if (!missing.length) {
@@ -381,7 +423,10 @@ async function execute(state, flags) {
       at += ffprobe(clip.file).duration;
       return entry;
     });
-    const cues = transcribe({ clips: timed, repo: REPO, dir: state.dir, log });
+    const cues = transcribe({
+      clips: timed, repo: REPO, dir: state.dir, log,
+      spoken: state.plan?.ugc?.script ?? "",
+    });
     Object.assign(stage(state, "captions"), { status: cues ? "done" : "skipped", cues: cues ? "cues.json" : null });
     save(state);
   } else if (steps.includes("captions") && !haveFootage) {
@@ -429,6 +474,15 @@ export async function runMake(prompt, flags) {
   log(`  steps     ${steps.join(" -> ")}`);
   log(`  script    ${plan.ugc.script.split(/\s+/).length} words`);
   for (const note of plan.notes) log(`  note      ${note}`);
+
+  // The plan, in full, before anything is made or bought. `confirm` is how the
+  // caller turns that into a stop: the session asks, a script with --yes does not,
+  // and a pipe with no terminal cannot be asked and so is never held up.
+  const planned = { ...plan, steps };
+  for (const line of briefLines(planned, flags, { limits: await farmLimits(steps, flags) })) log(line);
+  if (flags.confirm && !(await flags.confirm(planned))) {
+    throw new StepError("stopped before anything ran", { hint: "nothing was made and nothing was spent" });
+  }
 
   log("\nchecking what this needs");
   const checks = await preflight({

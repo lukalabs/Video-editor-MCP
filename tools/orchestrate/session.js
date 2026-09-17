@@ -132,6 +132,10 @@ export async function runSession(flags) {
         ...flags, resolution, media,
         // A finished project opens in the editor. A dry run has nothing to open.
         dryRun: !media, spend: false, serve: Boolean(media), open: Boolean(media),
+        // The first of the two stops. This one is free to say no to — nothing has
+        // been made yet — so it is the cheap place to catch a plan that misread
+        // the sentence, rather than finding out at the one that costs money.
+        confirm: async () => (await ask("go ahead with this plan? [y/N] ▸ "))?.toLowerCase() === "y",
       });
     } catch (error) {
       log(`\n  stopped: ${error.message}`);
@@ -139,6 +143,7 @@ export async function runSession(flags) {
       log("");
       continue;
     }
+    if (!runId) continue;
 
     // With your own clip there is nothing to buy — it is already finished.
     if (media) { log(""); continue; }

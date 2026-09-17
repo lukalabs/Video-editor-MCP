@@ -16,10 +16,35 @@ import { StepError, round, sh } from "./lib.js";
 
 export const whisperPython = (repo) => resolve(repo, "storage/caption-work/venv/bin/python");
 
+/**
+ * Words the model says correctly but Whisper spells wrong, and what they should be.
+ *
+ * "Replika" and "replica" are the same sound, so the audio is right either way and
+ * ugc-farm's own checker deliberately accepts either in a prompt (`HOMOPHONES` in
+ * `ugc/writer.py`). Subtitles are not audio: whichever spelling Whisper picks is the
+ * one people read, and a brand name misspelled across the whole video is the kind of
+ * thing that is only noticed after it is posted.
+ *
+ * Case is preserved on the first letter so a word that opened a sentence still does.
+ */
+const HEARD_AS = [[/\breplicas\b/gi, "Replikas"], [/\breplica\b/gi, "Replika"]];
+
+export function spellBrands(text) {
+  let out = String(text ?? "");
+  for (const [pattern, correct] of HEARD_AS) {
+    out = out.replace(pattern, (match) => (
+      // A lower-case hit mid-sentence still becomes the brand; the brand is a proper
+      // noun, so there is no lower-case form of it to preserve.
+      match === match.toUpperCase() && match.length > 1 ? correct.toUpperCase() : correct
+    ));
+  }
+  return out;
+}
+
 /** Shift one clip's words onto the timeline. */
 export function offsetWords(words, seconds) {
   return words.map((word) => ({
-    text: String(word.text ?? "").trim(),
+    text: spellBrands(String(word.text ?? "").trim()),
     startTime: round(Number(word.startTime) + seconds),
     endTime: round(Number(word.endTime) + seconds),
   })).filter((word) => word.text && word.endTime > word.startTime);
@@ -29,7 +54,7 @@ export function offsetWords(words, seconds) {
  * @param {{clips: {file: string, at: number}[], repo: string, dir: string, log: Function}} options
  * @returns {string|null} the cue file, or null when there was nothing to hear
  */
-export function transcribe({ clips, repo, dir, log }) {
+export function transcribe({ clips, repo, dir, log, spoken = "" }) {
   const python = whisperPython(repo);
   if (!existsSync(python)) {
     throw new StepError("the whisper virtualenv is missing", {
@@ -53,7 +78,9 @@ export function transcribe({ clips, repo, dir, log }) {
       // The first ever run downloads the large-v3 weights, about 3 GB, and looks
       // exactly like a hang. Say so before going quiet.
       log(`  part ${part}  listening…  (int8 large-v3 on CPU, roughly 2-4x the clip's length)`);
-      sh(python, [script, wav, words], { timeoutMs: 15 * 60 * 1000 });
+      // The script goes in as a decoding hint, not as the answer — see transcribe.py.
+      sh(python, [script, wav, words, ...(spoken ? [spoken] : [])],
+         { timeoutMs: 15 * 60 * 1000 });
     }
 
     const heard = JSON.parse(readFileSync(words, "utf8"));

@@ -50,6 +50,14 @@ const STEP_PLAN_SCHEMA = {
             + "logos, packshots, edits or cuts.",
         },
         screen_in_shot: { type: "boolean" },
+        durationSeconds: {
+          type: "number",
+          description:
+            "The clip's length in seconds, but ONLY when the prompt states one — "
+            + "\"8 seconds\", \"a 10s clip\", \"keep it under 6\". Omit it entirely "
+            + "when the prompt says nothing about length; the length is then worked "
+            + "out from the script. Between 4 and 30.",
+        },
         screen_describes: {
           type: "string",
           description:
@@ -185,6 +193,10 @@ Other guidance:
 - Pick a caption preset that matches the tone they asked for. "TikTok style",
   "Hormozi" or "bold" means hormozi. "Clean" or "minimal" means clean.
 - The button's label is whatever text they put in brackets or quotes.
+- "durationSeconds" is only for a length the director actually states — "8
+  seconds", "a 10s clip", "keep it under 6". Say nothing about length and it must
+  be left out, so the pipeline works it out from the script. Never infer a length
+  from how long the script sounds; that is already done downstream.
 - Dates on memory facts should be recent — within the last few months of TODAY,
   which is ${new Date().toISOString().slice(0, 10)}. Write them like "Mar 3, 2026".
 - "notes" is for anything the prompt left genuinely ambiguous, so a person can
@@ -369,6 +381,14 @@ export function coerce(raw) {
   plan.ugc = { screen_in_shot: true, ...(plan.ugc ?? {}) };
   plan.ugc.script = String(plan.ugc.script ?? "").trim();
   plan.ugc.action = String(plan.ugc.action ?? "").trim();
+  // A stated length, or nothing at all. Zero means "work it out from the script",
+  // which is what happens when the director says nothing about how long it runs.
+  // Out-of-range is dropped rather than clamped: a 40-second ask silently becoming
+  // 30 is a different video than the one that was asked for.
+  const asked = Number(plan.ugc.durationSeconds);
+  plan.ugc.durationSeconds = Number.isFinite(asked) && asked >= 4 && asked <= 30
+    ? Math.round(asked)
+    : 0;
 
   const ui = plan.uiSnap ?? {};
   plan.uiSnap = {

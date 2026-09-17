@@ -98,6 +98,37 @@ export const CAPTION_PRESETS = {
 };
 
 /** Scales a preset's pixel sizes from its 1080-wide reference to the real frame. */
+/**
+ * How much of the frame a caption line may use. The rest is breathing room, and on
+ * a phone it is also where the platform puts its own interface.
+ */
+const SAFE_WIDTH = 0.9;
+
+/**
+ * Average width of one upper-case character, as a fraction of the font size.
+ *
+ * Measured, not guessed: "MY REPLIKA REMEMBERS" in Montserrat Black at 84px renders
+ * 1162px wide, which is 1162 / (20 x 84) = 0.69. The bold faces these presets use
+ * (Montserrat Black, Poppins Black, Inter Black) are close enough to share it.
+ *
+ * It is an average, so a line of nothing but W still overflows. That is the right
+ * trade: sizing for the widest possible character would leave every ordinary line
+ * looking half-size.
+ */
+const CHAR_WIDTH_EM = 0.69;
+
+/**
+ * The longest line, in characters, that fits the frame at this size.
+ *
+ * The caption grouper needs a character count and the canvas has a width, so one has
+ * to be converted into the other somewhere. Doing it here means changing a preset's
+ * font size moves the limit with it, instead of leaving two numbers to drift apart —
+ * which is what put a 1162px line on a 1080px canvas.
+ */
+export function charsThatFit(fontSize, frameWidth) {
+  return Math.max(6, Math.floor((frameWidth * SAFE_WIDTH) / (fontSize * CHAR_WIDTH_EM)));
+}
+
 export function scalePreset(preset, frameWidth) {
   const scale = frameWidth / 1080;
   if (scale === 1) return preset.style;

@@ -34,9 +34,12 @@ Brings the three servers up if they are not already, then asks:
 make ▸ a redhead woman in a sunny dorm room says […]
 ```
 
-It plans, takes the screenshot, writes the video prompt, shows you what a render
-would cost — and then asks once before spending. Answer `n` and it stays a dry
-run you can pay for later. Then it asks again, until you type `quit`.
+It plans and shows you the plan — every step in order, with the one that costs
+money marked — and waits. Say yes and it takes the screenshot and writes the video
+prompt, then shows you the beats it is about to buy and asks once more before
+spending. Answer `n` at either point and nothing is lost: the second one leaves a
+dry run you can pay for later. Then it asks what to make again, until you type
+`quit`.
 
 At the prompt you can also type `720p` / `1080p` / `480p` to change resolution,
 `clip <path>` to edit a clip you already have instead of rendering one (free),
@@ -71,11 +74,61 @@ orchestrate doctor                      # is everything this needs running?
 | `--captions overlay\|layer\|none` | `overlay` | see *Captions*, below |
 | `--preset <name>` | from the prompt | `hormozi`, `clean`, `bounce`, `boxed`, `highlight-box` |
 | `--resolution 480p\|720p\|1080p` | `1080p` | 1080p comes back as 10-bit HEVC — see below |
+| `--duration <4-30>` | from the script | how many seconds the clip runs — see *Length*, below |
+| `--yes` | | skip the stop on the plan (for scripts; does not spend) |
 | `--size` / `--fps` | `1080x1920` / `30` | the canvas |
 | `--button-lead <s>` | from the prompt | how long the CTA is on screen |
 | `--flatten-color <#hex>` | `#16181D` | what the screenshot's transparency is painted onto |
 | `--no-serve` / `--open` | serve | hand the finished project to the editor, or don't |
 | `--keep <n>` | `8` | how many served copies to leave in the editor's public folder |
+
+## The plan, before anything runs
+
+`make` prints the whole thing and waits:
+
+```
+PLAN — Breakup Memory Bed
+
+  1) ui-snap — the app screen   free
+  2) ugc-farm — the footage     PAID  ~389,600 tokens
+     1080p, 8s, 9:16 (asked for)
+     spoken words — these decide the render, so read them:
+       My Replika remembers everything. Download Replika now.
+  …
+run this? [y/N] ▸
+```
+
+Numbered in the order they run, with the one paid step marked. `orchestrate plan`
+prints the same thing without running anything at all.
+
+Then it stops a second time, once the video prompt exists, and shows the beats it
+is about to buy along with anything the checker complained about. The first stop
+catches a misread sentence; the second catches a prompt that is a valid submission
+but describes the wrong video. Neither of them spends — `--spend` still does that.
+
+`--yes` waives the first stop, and so does running without a terminal, so nothing
+in a script or a pipe waits on an answer nobody is there to give.
+
+## Length
+
+By default the clip's length is worked out from the script: ugc-farm divides the
+word count by a beat rate and that is how many seconds it asks for. Silence costs
+nothing in that arithmetic, so a script with a long pause or a wordless phone
+reveal in it comes out shorter than the shot needs.
+
+Say a length and it is used instead:
+
+```bash
+orchestrate make "an 8 second clip. a blonde woman …"     # said in the sentence
+orchestrate make "a blonde woman …" --duration 8          # or as a flag
+```
+
+The flag wins over the sentence. Either way the number reaches ugc-farm **before**
+the prompt is written, so the beats are laid out against the length that is
+actually rendered — the point of doing it there rather than at the render.
+
+4 to 30 seconds, which is the model's own range. Outside it, the run stops rather
+than quietly rendering a different video than the one that was asked for.
 
 ## The servers
 
@@ -150,8 +203,10 @@ the shot; the default when the take is the one you are keeping.
 Only one thing in this chain costs money: the ugc-farm render. Everything else —
 the screenshot, the transcription, the button, the timeline — runs on this machine.
 
-Three things stand between a typo and a bill:
+Four things stand between a typo and a bill:
 
+0. **Two stops before it.** The plan, and then the written prompt. See *The plan,
+   before anything runs*, above.
 1. **`--spend` is required.** Without it the run does everything else and stops.
 2. **`--dry-run`** goes further: it creates the ugc-farm project, uploads the
    screen, writes the prompt, and prints the exact payload a render would send,
@@ -192,6 +247,28 @@ draggable and trimmable — but the text sits still.
 You cannot have both: the animation is drawn by a renderer that only reads the
 overlay. Pick per video.
 
+### What the words say, and how wide they are
+
+Two things sit between Whisper and a caption you would ship.
+
+**The brand name.** "Replika" and "replica" are the same sound, and the video prompt
+deliberately spells it the second way — Seedance voices whatever spelling it is given
+(ugc-farm, UGC-RULES §3a). Whisper then writes down what it hears. Audio is unaffected;
+the subtitle is what people read, so the spelling is corrected on the way in. The
+script is also handed to Whisper as a decoding hint, which is what stops a made-up
+proper noun coming back as something else entirely.
+
+That correction assumes the audio is right. If the render itself said the name wrong,
+this makes the subtitle disagree with the voice rather than fixing anything — so a
+caption that looks right is not evidence the clip is.
+
+**The line width.** A caption line is grouped by character count and drawn at a font
+size from the preset, and those were two separate numbers in two separate files. At
+`hormozi`'s 84px, twenty characters of Montserrat Black measures 1162px on a 1080px
+canvas: "MY REPLIKA REMEMBERS" ran off both sides. The limit is now worked out from the
+font size and the canvas width (`charsThatFit` in project-cli), so changing a preset
+moves it too.
+
 ## Two things worth knowing
 
 **The button ends exactly where the packshot begins.** They sit on different tracks,
@@ -208,6 +285,19 @@ collided. The arithmetic is what keeps them apart, and the run prints it:
 **The first captions run downloads about 3 GB** of Whisper weights and looks
 exactly like a hang. After that, expect roughly two to four times the clip's
 length, on CPU.
+
+## What gets checked before a render
+
+`orchestrate` shows you the plan, then the beats. ugc-farm does the checking, and since
+2026-09-17 its validator reads the project's rule documents in full rather than a
+416-word summary of them — so a rule written down is a rule enforced. Its prompt writer
+also repairs its own errors before handing them back, keeping whichever version scores
+best.
+
+What that means here: expect the second stop to report **0-1 errors** rather than the
+3-4 it used to. A finding cites its document and section, so you can go and read the
+rule rather than take the model's word for it. See `ugc-farm/README.md`, *How a prompt
+is checked*.
 
 ## Tests
 

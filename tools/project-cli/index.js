@@ -29,7 +29,7 @@ import {
   setSubtitles,
   ProjectKitError,
 } from "../../packages/project-kit/src/index.js";
-import { CAPTION_PRESETS, scalePreset } from "./presets.js";
+import { charsThatFit,CAPTION_PRESETS, scalePreset } from "./presets.js";
 import { loadCues } from "./cues.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -210,12 +210,13 @@ function cmdSubtitles(path, args) {
   }
 
   const project = readProject(path);
+  // The style first, because how wide a line may be depends on the size it is drawn
+  // at — and that is the preset scaled to this canvas, not the preset as written.
+  const style = scalePreset(preset, project.settings.width);
   const cues = loadCues(
     JSON.parse(readFileSync(resolve(args.cues), "utf8")),
-    { uppercase: preset.uppercase },
+    { uppercase: preset.uppercase, maxChars: charsThatFit(style.fontSize, project.settings.width) },
   );
-
-  const style = scalePreset(preset, project.settings.width);
 
   if (args.layer) {
     // The editor's own caption feature puts one text clip per cue on a track marked

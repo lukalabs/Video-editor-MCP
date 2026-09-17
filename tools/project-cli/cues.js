@@ -7,6 +7,15 @@
  */
 
 const MAX_WORDS = 4;
+/**
+ * The fallback when the caller does not say how wide a line may be.
+ *
+ * It is a character count, not a width, so it only holds while the font size it was
+ * chosen against holds. Callers that know the font size and the canvas should work
+ * the limit out instead — see `charsThatFit` in index.js. This number stayed at 20
+ * while the hormozi preset grew to 84px, and the two stopped agreeing: "MY REPLIKA
+ * REMEMBERS" is exactly 20 characters and measures 1162px on a 1080px canvas.
+ */
 const MAX_CHARS = 20;
 const GAP_SPLIT = 0.45;
 const MIN_DURATION = 0.3;
@@ -17,7 +26,7 @@ function looksLikeWordList(entries) {
   return entries.every((entry) => entry.words === undefined);
 }
 
-function groupWords(words) {
+function groupWords(words, maxChars = MAX_CHARS) {
   const cues = [];
   let current = [];
 
@@ -41,7 +50,7 @@ function groupWords(words) {
       if (
         word.startTime - previous.endTime > GAP_SPLIT ||
         current.length >= MAX_WORDS ||
-        candidate.length > MAX_CHARS ||
+        candidate.length > maxChars ||
         endsSentence
       ) {
         flush();
@@ -60,12 +69,12 @@ function groupWords(words) {
   return cues;
 }
 
-export function loadCues(json, { uppercase = false } = {}) {
+export function loadCues(json, { uppercase = false, maxChars = MAX_CHARS } = {}) {
   if (!Array.isArray(json) || json.length === 0) {
     throw new Error("cue file must be a non-empty array");
   }
 
-  const cues = looksLikeWordList(json) ? groupWords(json) : json;
+  const cues = looksLikeWordList(json) ? groupWords(json, maxChars) : json;
   const cased = (value) => (uppercase ? value.toUpperCase() : value);
 
   return cues.map((cue) => ({

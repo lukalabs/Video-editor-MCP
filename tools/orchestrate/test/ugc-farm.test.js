@@ -229,3 +229,49 @@ test("the resolution actually reaches the service", async () => {
     assert.deepEqual(sent, { part: 1, resolution: "1080p" });
   });
 });
+
+test("an asked-for duration reaches the service before the prompt is written", async () => {
+  const bodies = {};
+  await withFarm({
+    "PATCH /api/projects/P-1": { ok: true },
+    "POST /api/projects/P-1/plan": { ok: true },
+  }, async (fake) => {
+    const original = globalThis.fetch;
+    globalThis.fetch = (url, init) => {
+      const path = String(url).replace(/^.*\/api/, "/api");
+      if (init?.body) bodies[path] = JSON.parse(init.body);
+      return original(url, init);
+    };
+    try {
+      await fake.farm.setScene("P-1", { screenPng: "", describes: "", durationSeconds: 8 });
+    } finally {
+      globalThis.fetch = original;
+    }
+    // On the plan call, which happens before the prompt is written — not on the
+    // render, where it would arrive too late to shape the beats.
+    assert.equal(bodies["/api/projects/P-1/plan"].target_duration_s, 8);
+  });
+});
+
+test("no duration asked for means the field is not sent at all", async () => {
+  const bodies = {};
+  await withFarm({
+    "PATCH /api/projects/P-1": { ok: true },
+    "POST /api/projects/P-1/plan": { ok: true },
+  }, async (fake) => {
+    const original = globalThis.fetch;
+    globalThis.fetch = (url, init) => {
+      const path = String(url).replace(/^.*\/api/, "/api");
+      if (init?.body) bodies[path] = JSON.parse(init.body);
+      return original(url, init);
+    };
+    try {
+      await fake.farm.setScene("P-1", { screenPng: "", describes: "" });
+    } finally {
+      globalThis.fetch = original;
+    }
+    // Absent, rather than zero: the service reads a zero as "no length asked for"
+    // too, but only because it is spelled the same way by accident.
+    assert.ok(!("target_duration_s" in bodies["/api/projects/P-1/plan"]));
+  });
+});

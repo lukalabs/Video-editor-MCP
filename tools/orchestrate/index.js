@@ -61,6 +61,18 @@ const pick = (value, allowed, fallback, flag) => {
   return value;
 };
 
+/** `--duration`, checked against the model's range rather than quietly clamped. */
+const readDuration = (value) => {
+  if (value === undefined) return 0;
+  const seconds = Number(value === true ? NaN : value);
+  if (!Number.isFinite(seconds)) die("--duration needs a number of seconds");
+  if (seconds < 4 || seconds > 30) {
+    die(`--duration must be between 4 and 30 seconds (got ${seconds})`,
+        "longer scripts split into parts on their own");
+  }
+  return Math.round(seconds);
+};
+
 /** Every flag, resolved once, so no adapter has to re-read argv. */
 export function readFlags(args) {
   const size = String(args.size ?? "1080x1920");
@@ -87,6 +99,7 @@ export function readFlags(args) {
     fps: Number(args.fps ?? 30),
     name: args.name === true ? "" : args.name,
     buttonLead: Number(args["button-lead"] ?? 0) || 0,
+    duration: readDuration(args.duration),
     flattenColor: args["flatten-color"] === true ? "#16181D" : String(args["flatten-color"] ?? "#16181D"),
     serve: !args["no-serve"],
     open: Boolean(args.open),
@@ -127,8 +140,41 @@ async function cmdPlan(args) {
   }
   console.log(`planner   Gemini, key from ${source}`);
   console.log(`tags      ${tags.length ? tags.join(", ") : "(none — the planner chose)"}`);
-  console.log(`steps     ${plan.steps.join(" -> ")}\n`);
+  console.log(`steps     ${plan.steps.join(" -> ")}`);
+  const { briefLines } = await import("./brief.js");
+  for (const line of briefLines(plan, flags)) console.log(line);
+  console.log("the planner's own answer, in full:\n");
   console.log(JSON.stringify(plan, null, 2));
+}
+
+/**
+ * The stop on the plan, for the one-shot command.
+ *
+ * `--yes` waives it, and so does the absence of a terminal: a run in a script or a
+ * pipe has nobody to answer, and blocking there would turn every unattended run
+ * into a hang. Neither waiver spends anything on its own — `--spend` is still what
+ * buys a render.
+ */
+function askToProceed(args) {
+  if (args.yes || !process.stdin.isTTY) return null;
+  return async () => {
+    const { createInterface } = await import("node:readline");
+    const rl = createInterface({ input: process.stdin, output: process.stdout });
+    process.stdout.write("run this? [y/N] ▸ ");
+    // `rl.question` is the obvious way and it is wrong here, for the same reason
+    // the session has its own reader: piped input closes stdin as soon as the
+    // answer is written, and the close arrives while the line is still buffered.
+    // Racing them rejects on an answer that was given — a typed "y" read as a no,
+    // which is the one mistake a confirmation must never make. Waiting for `line`
+    // and treating close as no only when no line came fixes both ends of it.
+    const answer = await new Promise((resolve) => {
+      let got = null;
+      rl.on("line", (line) => { got = line; rl.close(); });
+      rl.on("close", () => resolve(got));
+    });
+    if (answer === null) process.stdout.write("\n");
+    return String(answer ?? "").trim().toLowerCase() === "y";
+  };
 }
 
 /** A prompt piped in, if there is one.
@@ -149,7 +195,7 @@ async function cmdMake(args) {
   const { runMake } = await import("./run.js");
   const prompt = args._[1] ?? readStdin();
   if (!prompt) die('give me a prompt: orchestrate make "…"');
-  await runMake(prompt, readFlags(args));
+  await runMake(prompt, { ...readFlags(args), confirm: askToProceed(args) });
 }
 
 async function cmdResume(args) {
@@ -190,8 +236,11 @@ if (!command || !COMMANDS[command]) {
   console.error("  orchestrate stop               shut the servers down");
   console.error('  orchestrate make "<prompt>"    one run [--dry-run] [--spend] [--media <file>]');
   console.error("  orchestrate resume <run-id>    continue one, without paying twice");
-  console.error('  orchestrate plan "<prompt>"    just the planning. Free');
+  console.error('  orchestrate plan "<prompt>"    just the planning, and the plan. Free');
   console.error("  orchestrate doctor             is everything running?");
+  console.error("");
+  console.error("  make shows the plan and waits for a yes. --yes skips that stop.");
+  console.error("  --duration <4-30> sets the clip length instead of the script deciding.");
   process.exit(1);
 }
 
