@@ -138,6 +138,15 @@ export interface Clip {
   readonly keyframes: Keyframe[];
   readonly speed?: number;
   readonly reversed?: boolean;
+  /**
+   * Marks clips that were split out of one source together, so an edit to one can
+   * follow to the others - the video clip and the audio clips `separateAudio` lifts
+   * off it share an id. Deliberately NOT set by duplicate or paste: a second copy of
+   * a clip is its own clip, and sharing media with another is not a link. Absent on
+   * every clip saved before this existed, which reads as "not linked" and leaves old
+   * projects behaving exactly as they did; links are only ever created going forward.
+   */
+  readonly linkGroupId?: string;
   readonly smoothSlowMo?: boolean;
   readonly interpolationQuality?: "low" | "medium" | "high";
   readonly stabilization?: {

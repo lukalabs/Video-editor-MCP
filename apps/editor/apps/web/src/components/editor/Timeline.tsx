@@ -853,23 +853,21 @@ export const Timeline: React.FC = () => {
         return kf;
       });
 
-      useProjectStore.setState((state) => ({
-        project: {
-          ...state.project,
-          timeline: {
-            ...state.project.timeline,
-            tracks: state.project.timeline.tracks.map((track) => ({
-              ...track,
-              clips: track.clips.map((c) =>
-                c.id === clipId
-                  ? { ...c, ...updates, keyframes: adjustedKeyframes }
-                  : c,
-              ),
-            })),
-          },
-          modifiedAt: Date.now(),
+      // Goes through the action system rather than writing the store directly:
+      // a raw setState left no history entry, so a trim could not be undone at all.
+      // Repeated resizeEdge actions on one clip coalesce into a single undo step,
+      // so a drag is one entry rather than one per mouse move.
+      void useProjectStore.getState().executeAction({
+        type: "clip/resizeEdge",
+        id: crypto.randomUUID(),
+        timestamp: Date.now(),
+        params: {
+          clipId,
+          ...updates,
+          keyframes: adjustedKeyframes,
         },
-      }));
+      });
+
       const newStartTime = edge === "left" ? newTime : clip.startTime;
       trimLinkedCaptions(
         useProjectStore.getState(),

@@ -3,7 +3,7 @@ import { ToolcraftContextMenu as ContextMenu } from "@openreel/ui";
 import { Type } from "@/icons/lucide-compat";
 import type { TextClip, Track } from "@openreel/core";
 import { useGraphicsClipContextMenuItems } from "./GraphicsClipContextMenu";
-import { calculateSnap } from "./utils";
+import { calculateSnap, snapTrimEdge } from "./utils";
 import { useProjectStore } from "../../../stores/project-store";
 import { useTimelineStore } from "../../../stores/timeline-store";
 import { useUIStore } from "../../../stores/ui-store";
@@ -190,22 +190,30 @@ export const TextClipComponent: React.FC<TextClipComponentProps> = ({
       const deltaX = e.clientX - trimStartRef.current.mouseX;
       const deltaTime = deltaX / pixelsPerSecond;
 
+      // Same cross-track edge snapping as media clips. No snap indicator here:
+      // these overlay components have no onSnapIndicator prop, and they do not
+      // drive the indicator while moving either.
+      const snappedEdge = snapTrimEdge(
+        isTrimming === "left"
+          ? trimStartRef.current.startTime + deltaTime
+          : trimStartRef.current.startTime +
+              trimStartRef.current.duration +
+              deltaTime,
+        textClip.id,
+        allTracks,
+        snapSettings,
+        pixelsPerSecond,
+      );
+
       if (isTrimming === "left") {
-        const newStartTime = Math.max(
-          0,
-          trimStartRef.current.startTime + deltaTime,
-        );
+        const newStartTime = Math.max(0, snappedEdge.time);
         const maxStartTime =
           trimStartRef.current.startTime + trimStartRef.current.duration - 0.1;
         const clampedStartTime = Math.min(newStartTime, maxStartTime);
         onTrim(textClip.id, "left", clampedStartTime);
       } else {
-        const newEndTime =
-          trimStartRef.current.startTime +
-          trimStartRef.current.duration +
-          deltaTime;
         const minEndTime = trimStartRef.current.startTime + 0.1;
-        const clampedEndTime = Math.max(newEndTime, minEndTime);
+        const clampedEndTime = Math.max(snappedEdge.time, minEndTime);
         onTrim(textClip.id, "right", clampedEndTime);
       }
     };
@@ -224,7 +232,15 @@ export const TextClipComponent: React.FC<TextClipComponentProps> = ({
       window.removeEventListener("mousemove", handleMouseMove);
       window.removeEventListener("mouseup", handleMouseUp);
     };
-  }, [isTrimming, textClip.id, pixelsPerSecond, onTrim, endTimingGesture]);
+  }, [
+    isTrimming,
+    textClip.id,
+    pixelsPerSecond,
+    onTrim,
+    endTimingGesture,
+    allTracks,
+    snapSettings,
+  ]);
 
   const isInteracting = isDragging || isTrimming;
   const contextMenuItems = useGraphicsClipContextMenuItems({

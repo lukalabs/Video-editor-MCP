@@ -142,6 +142,11 @@ export function createClipSlice(set: Set, get: Get): ClipSlice {
       }
 
       const projectCopy = structuredClone(project);
+      // The video clip and every audio clip lifted off it share this id, so an edit
+      // that should follow across a detached pair (speed, reverse) has a real signal
+      // to follow rather than guessing from a shared mediaId - which would also match
+      // an unrelated duplicate of the same media.
+      const linkGroupId = uuidv4();
       const existingAudioCount = projectCopy.timeline.tracks.filter(
         (t) => t.type === "audio",
       ).length;
@@ -202,6 +207,7 @@ export function createClipSlice(set: Set, get: Get): ClipSlice {
             speed: videoClip.speed,
             reversed: videoClip.reversed,
             audioTrackIndex: trackIdx,
+            linkGroupId,
           },
         };
         lastResult = await actionExecutor.execute(action, projectCopy);
@@ -212,7 +218,16 @@ export function createClipSlice(set: Set, get: Get): ClipSlice {
         for (const track of projectCopy.timeline.tracks) {
           const clipIndex = track.clips.findIndex((c) => c.id === clipId);
           if (clipIndex !== -1) {
-            (track.clips[clipIndex] as unknown as { volume: number }).volume = 0;
+            const source = track.clips[clipIndex] as unknown as {
+              volume: number;
+              linkGroupId?: string;
+            };
+            source.volume = 0;
+            // Stamps the source side of the pair. Written directly for the same
+            // reason the muting above is: this whole block is patching the already
+            // executed copy, and a field-set action would be a second history entry
+            // for what the user did once.
+            source.linkGroupId = linkGroupId;
             break;
           }
         }

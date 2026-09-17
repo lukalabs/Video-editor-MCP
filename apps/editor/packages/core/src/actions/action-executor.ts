@@ -814,6 +814,7 @@ export class ActionExecutor {
           speed?: number;
           reversed?: boolean;
           audioTrackIndex?: number;
+          linkGroupId?: string;
           sourceClip?: Clip;
           clipId?: string;
         };
@@ -845,6 +846,11 @@ export class ActionExecutor {
                 id: params.clipId ?? crypto.randomUUID(),
                 trackId: params.trackId,
                 startTime: params.startTime,
+                // A copy of a linked clip is not part of that link. Paste, multicam
+                // and sequence-flattening all land here, and every one of them makes
+                // an independent clip - inheriting the group would make an edit to
+                // the original reach into the copy.
+                linkGroupId: undefined,
               }
             : {
                 id: params.clipId ?? crypto.randomUUID(),
@@ -868,6 +874,9 @@ export class ActionExecutor {
                   : {}),
                 ...(params.audioTrackIndex !== undefined
                   ? { audioTrackIndex: params.audioTrackIndex }
+                  : {}),
+                ...(params.linkGroupId !== undefined
+                  ? { linkGroupId: params.linkGroupId }
                   : {}),
               };
           params.clipId = newClip.id;

@@ -8,6 +8,78 @@ import type {
   TrackInfo,
 } from "./types";
 
+/** One clip of a multi-selection as captured when the drag began. */
+export interface DraggedCompanion {
+  readonly clipId: string;
+  readonly startTime: number;
+  readonly trackId: string;
+}
+
+export interface GroupTrackShift {
+  /** How many tracks the whole selection moves. 0 means it stays put vertically. */
+  readonly trackOffset: number;
+  /** Track the dragged clip lands on. */
+  readonly primaryTrackId: string;
+  /** Destination track per companion clip id. */
+  readonly destinations: ReadonlyMap<string, string>;
+}
+
+/**
+ * Resolves where a dragged selection lands vertically.
+ *
+ * The selection moves as one rigid body: every clip shifts by the same number of
+ * tracks, so the spacing between them survives the drag. The shift is all-or-nothing
+ * - if any clip would land on a locked track or past either end of the track list,
+ * the whole group keeps its tracks and only the horizontal move applies. A partial
+ * shift would quietly stack clips that were on separate tracks onto one.
+ */
+export const resolveGroupTrackShift = (
+  tracks: Track[],
+  sourceTrackId: string,
+  targetTrackId: string | undefined,
+  companions: readonly DraggedCompanion[],
+): GroupTrackShift => {
+  const sourceIndex = tracks.findIndex((t) => t.id === sourceTrackId);
+  const destIndex = targetTrackId
+    ? tracks.findIndex((t) => t.id === targetTrackId)
+    : sourceIndex;
+
+  let trackOffset =
+    sourceIndex >= 0 && destIndex >= 0 ? destIndex - sourceIndex : 0;
+
+  if (trackOffset !== 0 && companions.length > 0) {
+    const legal = companions.every((companion) => {
+      const from = tracks.findIndex((t) => t.id === companion.trackId);
+      if (from < 0) return false;
+      const to = tracks[from + trackOffset];
+      return Boolean(to) && !to.locked;
+    });
+    if (!legal) trackOffset = 0;
+  }
+
+  const destinations = new Map<string, string>();
+  for (const companion of companions) {
+    if (trackOffset === 0) {
+      destinations.set(companion.clipId, companion.trackId);
+      continue;
+    }
+    const from = tracks.findIndex((t) => t.id === companion.trackId);
+    destinations.set(
+      companion.clipId,
+      tracks[from + trackOffset]?.id ?? companion.trackId,
+    );
+  }
+
+  const primaryTrackId =
+    trackOffset === 0
+      ? companions.length > 0
+        ? sourceTrackId
+        : (targetTrackId ?? sourceTrackId)
+      : (tracks[sourceIndex + trackOffset]?.id ?? sourceTrackId);
+
+  return { trackOffset, primaryTrackId, destinations };
+};
+
 export const calculateSnap = (
   rawTime: number,
   clipId: string,
@@ -321,4 +393,41 @@ export const getClipStyle = (trackType: string): ClipStyle => {
         selectedText: "text-white",
       };
   }
+};
+
+/**
+ * Snaps the edge being dragged to the nearest clip edge anywhere on the timeline.
+ *
+ * Trimming used to snap to nothing at all - the pixel delta went straight onto the
+ * clip - so an edge could only be lined up with another clip by eye. `calculateSnap`
+ * already gathers candidates from every track, so this is cross-track by
+ * construction: the left edge of a clip on V1 will snap to the right edge of a clip
+ * on A3, which is the alignment that actually matters when cutting to a beat or a
+ * line of dialogue.
+ *
+ * Only clip edges and markers are considered. Grid and playhead snapping are left to
+ * the move path: a trim is an alignment gesture against other material, and having
+ * the edge jump to a grid line fights the frame-accurate nudge people expect.
+ */
+export const snapTrimEdge = (
+  rawTime: number,
+  clipId: string,
+  tracks: Track[],
+  snapSettings: SnapSettings,
+  pixelsPerSecond: number,
+): SnapResult => {
+  if (!snapSettings.enabled || !snapSettings.snapToClips) {
+    return { time: rawTime, snapped: false };
+  }
+
+  // No clipDuration: a trim moves one edge, so the opposite edge must not be
+  // offered a snap of its own.
+  return calculateSnap(
+    rawTime,
+    clipId,
+    tracks,
+    0,
+    { ...snapSettings, snapToGrid: false, snapToPlayhead: false },
+    pixelsPerSecond,
+  );
 };

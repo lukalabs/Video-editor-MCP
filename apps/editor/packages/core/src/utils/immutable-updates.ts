@@ -365,6 +365,8 @@ export function duplicateClip(
     ...clip,
     id: newId,
     startTime: newStartTime ?? clip.startTime + clip.duration,
+    // A duplicate is its own clip: it does not join the original's link group.
+    linkGroupId: undefined,
   };
 
   return addClipToTrack(timeline, clip.trackId, duplicated);
