@@ -132,6 +132,12 @@ const STEP_PLAN_SCHEMA = {
             fillColor: { type: "string", description: "Hex, like #FF4B6E." },
             textColor: { type: "string" },
             positionY: { type: "number", description: "0 is the top, 1 the bottom." },
+            // The canvas is 1080 wide. "Big" means 816x145 with 53px text — about
+            // three quarters of the width, settled by looking at a render rather
+            // than guessed, so a prompt asking for a big button gets that one.
+            width: { type: "number", description: "Button width in pixels on a 1080-wide frame. 120-1200. A \"big\" button is 816." },
+            height: { type: "number", description: "Button height in pixels. 48-400. A \"big\" button is 145." },
+            fontSize: { type: "number", description: "Label size in pixels. 12-120. A \"big\" button is 53." },
             animation: { type: "string", enum: ANIMATIONS },
             easing: { type: "string", enum: EASINGS },
           },
@@ -429,6 +435,9 @@ export function coerce(raw) {
 
   const props = plan.button?.props ?? {};
   const hex = (value, fallback) => (/^#[0-9a-f]{6}$/i.test(value ?? "") ? value : fallback);
+  /** The component rejects out-of-range numbers, so they are clamped rather than passed on. */
+  const bounded = (value, min, max, fallback) =>
+    (Number.isFinite(Number(value)) ? Math.min(max, Math.max(min, Math.round(Number(value)))) : fallback);
   const fillColor = hex(props.fillColor, "#FFFFFF");
   plan.button = {
     leadSeconds: Number(plan.button?.leadSeconds) > 0 ? Number(plan.button.leadSeconds) : 5,
@@ -439,6 +448,13 @@ export function coerce(raw) {
       // an invisible CTA is the kind of thing nobody notices until the export.
       textColor: readable(hex(props.textColor, ""), fillColor),
       positionY: Number.isFinite(props.positionY) ? Math.min(1, Math.max(0, props.positionY)) : 0.82,
+      // The component's own defaults (420x120, 42px) were drawn for a 1920-wide
+      // landscape canvas. On the 1080-wide vertical frame this chain renders, that
+      // is a third of the width and reads as small. These are the "big" numbers,
+      // which is what a CTA in a vertical ad wants by default.
+      width: bounded(props.width, 120, 1200, 816),
+      height: bounded(props.height, 48, 400, 145),
+      fontSize: bounded(props.fontSize, 12, 120, 53),
       animation: pick(props.animation, ANIMATIONS, "slideUp"),
       easing: pick(props.easing, EASINGS, "soft"),
     },

@@ -122,6 +122,12 @@ export function briefLines(plan, flags, { limits = null } = {}) {
     out.push(step("button — the CTA"));
     out.push(`     "${props.label}" · ${props.animation}/${props.easing}`
       + ` · ${lead}s on screen · ${Math.round((props.positionY ?? 0) * 100)}% down the frame`);
+    // Size is the one the sentence is most likely to have asked for and the one
+    // you cannot see until the render, so it goes in the plan rather than the log.
+    if (props.width) {
+      out.push(`     ${props.width}x${props.height}px, ${props.fontSize}px text`
+        + ` — ${Math.round((props.width / 1080) * 100)}% of the frame's width`);
+    }
     out.push("");
   }
 
