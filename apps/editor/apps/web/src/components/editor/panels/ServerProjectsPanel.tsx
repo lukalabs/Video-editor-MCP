@@ -3,6 +3,7 @@ import React, { useCallback, useEffect, useState } from "react";
 import { refreshRegistry } from "../../../services/component-library-clips";
 import { saveMediaBlob } from "../../../services/media-storage";
 import {
+  deleteServerProject,
   fetchServerMedia,
   listServerProjects,
   loadServerProject,
@@ -58,6 +59,12 @@ export const ServerProjectsPanel: React.FC = () => {
   /** Which card has its re-file row open, and what has been typed into it. */
   const [movingId, setMovingId] = useState<string | null>(null);
   const [moveFolder, setMoveFolder] = useState("");
+  /**
+   * Which card has its delete confirmation open. Deleting is irreversible and sweeps the
+   * project's media with it, so the button only ever arms the confirm row — the DELETE
+   * fires from the second button, which names the project.
+   */
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     setError(null);
@@ -172,6 +179,67 @@ export const ServerProjectsPanel: React.FC = () => {
       }
     },
     [refresh],
+  );
+
+  /**
+   * Deletes one project, after the card's confirm row has been armed.
+   *
+   * Deleting the project that is currently OPEN deliberately does not reset the editor.
+   * The server copy and the in-memory one are separate things: wiping the timeline because
+   * a server row went away would destroy unsaved work to enact a delete the user asked for
+   * on the server, and there is no undo. So the editing session is left exactly as it is
+   * and only the baseline is dropped — `knownUpdatedAt` pointed at a row that no longer
+   * exists, and a save with a stale baseline would be a guard against nothing. With it
+   * cleared, "Save to server" simply re-creates the project (PUT is an upsert). Media is
+   * the one asymmetry: the sweep took the bytes the deleted project alone referenced, so a
+   * re-save uploads JSON referencing media the server no longer has until those items are
+   * re-imported. The toast says as much rather than hiding it.
+   */
+  const handleDelete = useCallback(
+    async (summary: ProjectSummary) => {
+      setBusy("Deleting…");
+      setError(null);
+      try {
+        const result = await deleteServerProject(summary.id);
+        setDeletingId(null);
+
+        if (summary.id === project.id) {
+          setKnownUpdatedAt(null);
+          setConflict(null);
+        }
+
+        const swept = result.orphanedMediaRemoved.length;
+        toast.success(
+          `Deleted ${summary.name}`,
+          [
+            swept > 0
+              ? swept === 1
+                ? "1 media file nothing else referenced was removed too."
+                : `${swept} media files nothing else referenced were removed too.`
+              : null,
+            summary.id === project.id
+              ? "Still open here — saving will re-create it on the server."
+              : null,
+          ]
+            .filter(Boolean)
+            .join(" ") || undefined,
+        );
+        await refresh();
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Unknown error";
+        // Refresh before reporting, not after: the likeliest failure is a 404 because
+        // someone else already deleted it, and re-listing makes that ghost card go away
+        // instead of leaving a row that errors every time it is pressed. `refresh` clears
+        // the error itself, so the message is set once it has finished.
+        setDeletingId(null);
+        await refresh();
+        setError(message);
+        toast.error("Could not delete the project", message);
+      } finally {
+        setBusy(null);
+      }
+    },
+    [project.id, refresh],
   );
 
   const handleOpen = useCallback(
@@ -399,6 +467,9 @@ export const ServerProjectsPanel: React.FC = () => {
                       onClick={() => {
                         const opening = movingId !== summary.id;
                         setMovingId(opening ? summary.id : null);
+                        // Only one row open per card, so an armed delete cannot sit
+                        // forgotten under a move form and be hit by accident.
+                        if (opening) setDeletingId(null);
                         // Prefilled with where it already is, so the field shows the current
                         // answer rather than an empty box. The default folder is not a real
                         // folder, so it starts blank in that case.
@@ -412,7 +483,60 @@ export const ServerProjectsPanel: React.FC = () => {
                     >
                       Move
                     </button>
+                    <button
+                      type="button"
+                      aria-label={`Delete project ${summary.name}`}
+                      aria-expanded={deletingId === summary.id}
+                      disabled={busy !== null}
+                      onClick={() => {
+                        const opening = deletingId !== summary.id;
+                        setDeletingId(opening ? summary.id : null);
+                        if (opening) setMovingId(null);
+                      }}
+                      className="my-2 mr-2 shrink-0 rounded-md border border-border/70 px-2 py-1 text-[11px] font-medium text-fg-muted hover:border-red-500/60 hover:text-red-400"
+                    >
+                      Delete
+                    </button>
                   </div>
+
+                  {deletingId === summary.id && (
+                    <div
+                      className="mt-1.5 rounded-lg border border-red-500/60 bg-red-500/10 p-2"
+                      role="alert"
+                    >
+                      <p className="text-[12px] leading-snug text-fg">
+                        Delete <span className="font-semibold">{summary.name}</span> from
+                        the server?
+                      </p>
+                      <p className="mt-0.5 text-[11px] leading-4 text-fg-muted">
+                        This cannot be undone, and media only this project uses is deleted
+                        with it.
+                        {summary.id === project.id
+                          ? " It stays open in the editor — saving would re-create it."
+                          : ""}
+                      </p>
+                      <div className="mt-2 flex gap-2">
+                        <button
+                          type="button"
+                          aria-label={`Confirm deleting ${summary.name}`}
+                          disabled={busy !== null}
+                          onClick={() => void handleDelete(summary)}
+                          className="rounded-md bg-red-500 px-2.5 py-1 text-[11px] font-semibold text-white"
+                        >
+                          Delete
+                        </button>
+                        <button
+                          type="button"
+                          aria-label={`Cancel deleting ${summary.name}`}
+                          disabled={busy !== null}
+                          onClick={() => setDeletingId(null)}
+                          className="rounded-md border border-border/70 px-2.5 py-1 text-[11px] font-medium text-fg-muted"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  )}
 
                   {movingId === summary.id && (
                     <div className="mt-1.5 rounded-lg border border-border/70 bg-bg-2 p-2">

@@ -119,6 +119,22 @@ export async function setServerProjectFolder(
   return asJson(response, "Moving project to a folder");
 }
 
+/**
+ * Deletes a project from the server. Irreversible: there is no trash.
+ *
+ * The route also sweeps media that no surviving project references any more (and the
+ * component metadata hanging off it), so the ids it removed come back here — the panel
+ * reports the count so a delete that quietly took media with it is visible.
+ */
+export async function deleteServerProject(
+  id: string,
+): Promise<{ deleted: string; orphanedMediaRemoved: string[] }> {
+  const response = await fetch(`${BASE}/projects/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+  });
+  return asJson(response, "Deleting project");
+}
+
 export async function loadServerProject(
   id: string,
 ): Promise<{ id: string; name: string; project: Project; updatedAt: number }> {
