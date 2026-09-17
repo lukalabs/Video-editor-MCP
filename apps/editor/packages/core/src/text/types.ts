@@ -3,6 +3,8 @@ import type {
   Keyframe,
   EasingType,
   ClipMetadata,
+  SubtitleWord,
+  CaptionAnimationStyle,
 } from "../types/timeline";
 import type {
   EmphasisAnimation,
@@ -19,6 +21,18 @@ export interface TextClip {
   readonly transform: Transform;
   readonly animation?: TextAnimation;
   readonly keyframes: Keyframe[];
+  /**
+   * Per-word timing for caption animation, measured from the START OF THIS CLIP
+   * rather than from the start of the timeline.
+   *
+   * Clip-relative deliberately: the words belong to the clip, so moving a caption
+   * along the timeline keeps it in sync with itself instead of silently drifting.
+   * (`Subtitle.words`, in the parallel and unused subtitle system, is absolute - the
+   * same SubtitleWord shape, a different frame of reference.)
+   */
+  readonly words?: readonly SubtitleWord[];
+  /** How `words` animates. Without words, every style falls back to static text. */
+  readonly animationStyle?: CaptionAnimationStyle;
   /** Ordered visual effects applied after text rasterization. */
   readonly effects?: import("../types/timeline").Effect[];
   readonly blendMode?: import("../video/types").BlendMode;
@@ -77,6 +91,10 @@ export interface TextStyle {
   readonly letterSpacing: number;
   readonly textDecoration?: TextDecoration;
   readonly shader?: TextShaderStyle;
+  /** Colour of the word currently being spoken, for word-timed caption styles. */
+  readonly highlightColor?: string;
+  /** Colour of words not yet reached. Undefined leaves them the normal colour. */
+  readonly upcomingColor?: string;
 }
 
 export interface TextShaderStyle {

@@ -2,6 +2,13 @@ import type { Subtitle, CaptionAnimationStyle } from "../types/timeline";
 
 export type WordSegmentStyle = "normal" | "highlighted" | "hidden" | "active";
 
+/**
+ * Largest `scale` any style gives a segment. Renderers reserve gaps from this rather
+ * than from the current frame's scale, so words never overlap at the peak and the
+ * spacing does not twitch as the highlight moves.
+ */
+export const MAX_WORD_SEGMENT_SCALE = 1.15;
+
 export interface WordSegment {
   readonly text: string;
   readonly style: WordSegmentStyle;
