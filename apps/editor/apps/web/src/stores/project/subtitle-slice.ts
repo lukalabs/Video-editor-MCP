@@ -2,7 +2,10 @@ import { v4 as uuidv4 } from "uuid";
 import type { StoreApi } from "zustand";
 import type { ProjectState } from "../project-store";
 import { useEngineStore } from "../engine-store";
-import { splitCaptionIntoSingleLineCues } from "@openreel/core";
+import {
+  splitCaptionIntoSingleLineCues,
+  deriveWordTimings,
+} from "@openreel/core";
 
 type Get = StoreApi<ProjectState>["getState"];
 type Set = StoreApi<ProjectState>["setState"];
@@ -52,7 +55,7 @@ export function createSubtitleSlice(_set: Set, get: Get): SubtitleSlice {
       const duration = subtitle.endTime - subtitle.startTime;
       const style = subtitle.style;
 
-      createTextClip(
+      const created = createTextClip(
         captionsTrack.id,
         subtitle.startTime,
         subtitle.text,
@@ -63,10 +66,33 @@ export function createSubtitleSlice(_set: Set, get: Get): SubtitleSlice {
               fontSize: style.fontSize,
               color: style.color,
               backgroundColor: style.backgroundColor || undefined,
+              highlightColor: style.highlightColor,
+              upcomingColor: style.upcomingColor,
             }
           : undefined,
         metadata,
       );
+
+      // Every caption gets word timing, so every caption can animate. Real
+      // timestamps from transcription are used when the caller has them; otherwise
+      // the cue's duration is shared out across its words by length, which is an
+      // estimate but a far better one than leaving the caption static.
+      if (created) {
+        const words =
+          subtitle.words && subtitle.words.length > 0
+            ? subtitle.words.map((word) => ({
+                text: word.text,
+                // Callers pass timeline-absolute word times; clips store them
+                // relative to their own start.
+                startTime: word.startTime - subtitle.startTime,
+                endTime: word.endTime - subtitle.startTime,
+              }))
+            : deriveWordTimings(subtitle.text, duration);
+        get().setCaptionAnimation(created.id, {
+          words,
+          animationStyle: subtitle.animationStyle ?? "word-highlight",
+        });
+      }
       if (typeof metadata?.captionSourceClipId === "string") {
         const sourceTrack = get().project.timeline.tracks.find((track) =>
           track.clips.some((clip) => clip.id === metadata.captionSourceClipId),

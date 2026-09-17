@@ -35,6 +35,7 @@ export type TextGraphicsSlice = Pick<
   | "createTextClip"
   | "updateTextContent"
   | "updateTextStyle"
+  | "setCaptionAnimation"
   | "updateTextAnimation"
   | "updateTextTransform"
   | "updateTextBehindSubject"
@@ -247,6 +248,23 @@ export function createTextGraphicsSlice(
         recordOverlayUpdate("text", "textClips", clipId, updatedClip, beforeSnapshot);
       }
       return updatedClip || null;
+    },
+
+    setCaptionAnimation: (clipId, updates) => {
+      const titleEngine = useEngineStore.getState().getTitleEngine();
+      if (!titleEngine) return null;
+      const before = titleEngine.getTextClip(clipId);
+      const beforeSnapshot = before ? cloneClipSnapshot(before) : undefined;
+      const updatedClip = titleEngine.updateTextClip(clipId, {
+        ...(updates.words !== undefined ? { words: updates.words } : {}),
+        ...(updates.animationStyle !== undefined
+          ? { animationStyle: updates.animationStyle }
+          : {}),
+      });
+      if (updatedClip) {
+        recordOverlayUpdate("text", "textClips", clipId, updatedClip, beforeSnapshot);
+      }
+      return updatedClip ?? null;
     },
 
     updateTextAnimation: (clipId: string, animation: TextAnimation) => {

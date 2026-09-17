@@ -365,6 +365,13 @@ export interface ProjectState {
     clipId: string,
     animation: TextAnimation,
   ) => TextClip | null;
+  setCaptionAnimation: (
+    clipId: string,
+    updates: {
+      words?: readonly import("@openreel/core").SubtitleWord[];
+      animationStyle?: import("@openreel/core").CaptionAnimationStyle;
+    },
+  ) => TextClip | null;
   updateTextTransform: (
     clipId: string,
     transform: Partial<Transform>,

@@ -276,6 +276,18 @@ export interface ProjectState {
     clipId: string,
     animation: TextAnimation,
   ) => TextClip | null;
+  /**
+   * Sets the per-word caption timing and/or which style animates it. Separate from
+   * updateTextAnimation, which is the clip's entry/exit animation - a caption can
+   * have both.
+   */
+  setCaptionAnimation: (
+    clipId: string,
+    updates: {
+      words?: readonly import("@openreel/core").SubtitleWord[];
+      animationStyle?: import("@openreel/core").CaptionAnimationStyle;
+    },
+  ) => TextClip | null;
   updateTextTransform: (
     clipId: string,
     transform: Partial<Transform>,

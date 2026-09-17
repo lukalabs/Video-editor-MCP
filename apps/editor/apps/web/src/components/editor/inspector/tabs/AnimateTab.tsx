@@ -9,6 +9,7 @@ import {
   MotionPathSection,
   EmphasisAnimationSection,
   TextAnimationSection,
+  CaptionAnimationSection,
 } from "../";
 import { InspectorSection } from "../shell/InspectorSection";
 import { useRouter } from "../../../../hooks/use-router";
@@ -128,6 +129,15 @@ export const AnimateTab: React.FC<AnimateTabProps> = ({
           defaultOpen={false}
         >
           <TextAnimationSection clipId={clipId} />
+        </InspectorSection>
+      )}
+      {showTextSection && (
+        <InspectorSection
+          title="Caption Animation"
+          sectionId="caption-animation"
+          defaultOpen={false}
+        >
+          <CaptionAnimationSection clipId={clipId} />
         </InspectorSection>
       )}
     </>

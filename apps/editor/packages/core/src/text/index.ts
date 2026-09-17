@@ -4,6 +4,7 @@ export * from "./text-animation";
 export * from "./subtitle-engine";
 export * from "./speech-to-text-engine";
 export * from "./caption-animation-renderer";
+export * from "./word-timing";
 export * from "./text-animation-presets";
 export * from "./character-animator";
 export * from "./audio-text-sync-engine";
