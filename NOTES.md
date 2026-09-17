@@ -3578,3 +3578,102 @@ source's *plus exactly the exit wave*. 16 new exit-wave assertions on top.
 Also worth keeping: the renderer emits **one frame past the duration** (92 frames for a 1.5s
 clip at 60fps), so "the last frame" is not `t = duration`. An index-based mirror is off by one
 because of it; pair frames by time.
+
+## Stage 27 — word-highlighted captions
+
+Captions animate word by word, in the preview and in exports, from real Whisper word
+timestamps where the model can produce them and from an estimate where it cannot.
+
+### What was already there, and why none of it worked
+
+The fork shipped most of a word-highlight feature that could never run:
+
+- `caption-animation-renderer.ts` implements six styles (word-highlight, word-by-word,
+  karaoke, bounce, typewriter, none) against `Subtitle.words`.
+- Nothing ever populated `Subtitle.words`. The Whisper panel asked for
+  `return_timestamps: true`, which is one timestamp per sentence-ish chunk.
+- Nothing ever populated `timeline.subtitles` either: `subtitle/add` exists in core
+  with a validator, an executor and an inverse, and has no callers anywhere. Both the
+  Whisper panel and SRT import route through `addSubtitle`, which creates a TEXT CLIP
+  on a "Captions" track. Export reverses that, deriving SRT back out of text clips.
+- The inspector's animation-style dropdown read `selectedSubtitle` from that empty
+  array, so it could not affect anything, and its "re-generate captions to enable
+  animation" hint pointed at a path that never produced word timings.
+- The animated renderer was wired into the preview canvas only. Export draws text
+  through `video-engine`, which drew captions as plain text.
+
+So the feature was built on `timeline.subtitles`, and the product uses text clips. The
+work here moves it onto the side that is actually used, and leaves the subtitle system
+untouched and dead rather than deleting it.
+
+### Where the animation lives now
+
+`words` and `animationStyle` are fields on `TextClip`; `highlightColor` and
+`upcomingColor` are on `TextStyle`. `titleEngine.renderText` draws the word row, which
+matters: **the preview and the export both render text through `renderText`**, so one
+implementation serves both and the two cannot drift. This is the same class of bug as
+Stage 7 and the `render_preview_frame` alpha bug, and the fix is the same shape - make
+export use the shared path instead of its own simplified one.
+
+Word times are **clip-relative** (0 = clip start), unlike `Subtitle.words`, which is
+absolute. The words belong to the clip, so moving a caption keeps it in sync with
+itself.
+
+Gaps between words are reserved from `MAX_WORD_SEGMENT_SCALE`, not from the current
+frame's scale: a highlighted word grows about its own centre, and sizing the gaps per
+frame made the row twitch as the highlight travelled.
+
+### Every caption gets word timing
+
+`deriveWordTimings` shares a cue's duration across its words in proportion to spoken
+length (punctuation stripped, since it is not spoken). It is an estimate, and it is
+what SRT imports, hand-typed captions and the fast Whisper model get. Real timestamps
+overwrite it rather than merging. New captions default to `word-highlight`.
+
+### Only one of the two Whisper models can do word timestamps
+
+`whisper-large-v3-turbo_timestamped` can. `whisper-tiny` **cannot**, and does not
+degrade - the whole transcription throws:
+
+> Model outputs must contain cross attentions to extract timestamps. This is most
+> likely because the model was not exported with `output_attentions=True`.
+
+Word timings are extracted from decoder cross-attentions, which only the
+"_timestamped" builds are exported with. `supportsWordTimestamps` on the model
+definition decides what the worker asks for; a model without it gets segment
+timestamps and its captions fall back to the proportional estimate.
+
+Measured on 7.2s of synthesised speech, against ffmpeg `silencedetect` on the source:
+
+| boundary | audio | Whisper | delta |
+|---|---|---|---|
+| first sentence ends | 2.721s | 2.70s | 21 ms |
+| second sentence starts | 3.748s | 3.28s | 470 ms early |
+| speech ends | 6.373s | 6.34s | 33 ms |
+
+Ends of phrases land within ~30ms. The **start** of a phrase after a pause runs early,
+because Whisper anchors the first word to the end of the preceding silence rather than
+to the onset of speech. In practice the highlight lights the first word of a sentence
+about half a second before it is spoken. Trimming a word's start to the next
+`silencedetect` edge would fix it and has not been done.
+
+### Known external dependency: the model CDN is not ours
+
+`whisper-worker.ts` hardcodes `https://media.openreel.video/models/` - the upstream
+vendor's infrastructure, not ours. Inference is fully local and no audio leaves the
+machine, but the **first-run download** depends on a third party who has no obligation
+to keep serving it. If it disappears, auto-captions stop working for anyone who has not
+already cached a model.
+
+Re-hosting is a config change plus storage. Measured from the CDN:
+
+| model | encoder | decoder | tokenizer | total |
+|---|---|---|---|---|
+| large-v3-turbo_timestamped | 405.3 MB | 318.7 MB | 2.4 MB | ~726 MB |
+| whisper-tiny | 8.6 MB | 82.7 MB | 2.4 MB | ~94 MB |
+
+About **820 MB** for both, or ~726 MB for just the model that supports word timings.
+The work is: mirror the files, serve them from render-service (or any static host)
+under the same `{model}/resolve/{revision}/` layout, and point `env.remoteHost` at it.
+Worth doing before anyone depends on captions in production; the files are too large
+for the git repo, so they would need a storage directory and a fetch script.

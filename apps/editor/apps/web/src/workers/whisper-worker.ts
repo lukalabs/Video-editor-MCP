@@ -133,10 +133,16 @@ self.onmessage = async (
     if (!audio?.length) throw new Error("The selected clip has no decodable audio.");
 
     post(requestId, { type: "transcription-progress", progress: 0.05 });
+    const wordTimestamps = WHISPER_MODELS[modelKey].supportsWordTimestamps;
     const output = await transcriber(audio, {
       language,
       task: "transcribe",
-      return_timestamps: true,
+      // "word" gives one timestamp per word, which is what the caption renderer
+      // highlights against; `true` gives one pair per sentence-ish chunk, enough to
+      // place a caption but not to animate inside one. Only models exported with
+      // cross-attentions can do the former, and asking the others throws rather than
+      // degrading, so the model decides. Callers regroup words into cues.
+      return_timestamps: wordTimestamps ? "word" : true,
       chunk_length_s: 30,
       stride_length_s: 5,
     });
@@ -147,6 +153,8 @@ self.onmessage = async (
       chunks: result.chunks ?? [],
       model: modelKey,
       backend,
+      // Tells the caller whether `chunks` are words or sentence-ish segments.
+      wordTimestamps,
     });
   } catch (error) {
     post(requestId, {
