@@ -14,6 +14,7 @@ import { KeyboardShortcutsOverlay } from "./KeyboardShortcutsOverlay";
 import { PanelErrorBoundary } from "../ErrorBoundary";
 import { SpotlightTour, MoGraphTour } from "./tour";
 import { useProjectStore } from "../../stores/project-store";
+import { useServerSyncGuards } from "../../hooks/useServerSyncGuards";
 import { useUIStore } from "../../stores/ui-store";
 import { useEngineStore } from "../../stores/engine-store";
 import { useKeyboardShortcuts } from "../../hooks/useKeyboardShortcuts";
@@ -89,6 +90,10 @@ const useAutoSave = () => {
   useEffect(() => {
     initializeAutoSave().catch(console.error);
   }, [initializeAutoSave]);
+
+  // Flush on hide/blur and guard the unload, so the seconds-wide window automatic
+  // saving leaves open does not become "the tab closed and took it".
+  useServerSyncGuards();
 };
 
 /**

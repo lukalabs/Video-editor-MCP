@@ -38,12 +38,18 @@ export const ServerProjectsPanel: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   /**
-   * The `updatedAt` this session last saw for the open project. Sent as an
-   * optimistic-concurrency guard so a save cannot silently clobber someone else's newer
-   * one; `null` means "no baseline", which saves unguarded.
+   * The concurrency baseline and any conflict now live in the store, not here: saving
+   * happens automatically whether or not this panel is mounted, so a baseline held in
+   * component state would be lost the moment the panel closed.
    */
-  const [knownUpdatedAt, setKnownUpdatedAt] = useState<number | null>(null);
-  const [conflict, setConflict] = useState<ProjectConflictError | null>(null);
+  const serverSync = useProjectStore((state) => state.serverSync);
+  const beginServerSync = useProjectStore((state) => state.beginServerSync);
+  const noteServerSave = useProjectStore((state) => state.noteServerSave);
+  const clearServerSyncConflict = useProjectStore(
+    (state) => state.clearServerSyncConflict,
+  );
+  const knownUpdatedAt = serverSync.expectedUpdatedAt;
+  const conflict = serverSync.conflict;
   /** "" means every folder. Filtering happens client-side: the list is already loaded. */
   const [folderFilter, setFolderFilter] = useState("");
   /**
@@ -133,13 +139,13 @@ export const ServerProjectsPanel: React.FC = () => {
           force ? null : knownUpdatedAt,
           saveFolder.trim() === "" ? undefined : saveFolder.trim(),
         );
-        setKnownUpdatedAt(result.updatedAt);
-        setConflict(null);
+        // Tell sync about a save it did not make, so its baseline and its idea of what
+        // the server holds stay correct.
+        noteServerSave(result.updatedAt);
         toast.success("Project saved to the server", full.name);
         await refresh();
       } catch (err) {
         if (err instanceof ProjectConflictError) {
-          setConflict(err);
           toast.error(
             "Someone else saved this project",
             "Reload theirs, or overwrite it from the panel.",
@@ -153,7 +159,7 @@ export const ServerProjectsPanel: React.FC = () => {
         setBusy(null);
       }
     },
-    [getFullProject, knownUpdatedAt, refresh, saveFolder],
+    [getFullProject, knownUpdatedAt, noteServerSave, refresh, saveFolder],
   );
 
   /**
@@ -204,8 +210,9 @@ export const ServerProjectsPanel: React.FC = () => {
         setDeletingId(null);
 
         if (summary.id === project.id) {
-          setKnownUpdatedAt(null);
-          setConflict(null);
+          // The row is gone, so the guard has nothing to guard against; the next save
+          // re-creates the project through the upsert.
+          clearServerSyncConflict(null);
         }
 
         const swept = result.orphanedMediaRemoved.length;
@@ -268,9 +275,13 @@ export const ServerProjectsPanel: React.FC = () => {
         );
 
         const missing = items.filter((item) => item.isPlaceholder).length;
-        loadProject({ ...incoming, mediaLibrary: { items } });
-        setKnownUpdatedAt(record.updatedAt);
-        setConflict(null);
+        const opened = { ...incoming, mediaLibrary: { items } };
+        loadProject(opened);
+        // From here on this project saves itself; the timestamp is the baseline that
+        // makes those saves safe.
+        // getFullProject(), not `opened`: sync hashes what the store plus the engines
+        // hold, and a baseline hashed from a different shape would look like an edit.
+        beginServerSync(getFullProject(), record.updatedAt);
         await refreshRegistry();
 
         toast.success(
@@ -300,14 +311,14 @@ export const ServerProjectsPanel: React.FC = () => {
       <div className="flex gap-2">
         <button
           type="button"
-          aria-label="Save project to server"
+          aria-label="Save project to server now"
           disabled={busy !== null}
           onClick={() => void handleSave(false)}
           className={`flex-1 rounded-lg px-3 py-2 text-[13px] font-semibold ${
             busy ? "bg-bg-2 text-fg-muted" : "bg-accent text-white"
           }`}
         >
-          {busy === "Saving…" ? "Saving…" : "Save to server"}
+          {busy === "Saving…" ? "Saving…" : "Save now"}
         </button>
         <button
           type="button"
@@ -362,7 +373,10 @@ export const ServerProjectsPanel: React.FC = () => {
               type="button"
               aria-label="Overwrite the server copy"
               disabled={busy !== null}
-              onClick={() => void handleSave(true)}
+              onClick={() => {
+                clearServerSyncConflict(null);
+                void handleSave(true);
+              }}
               className="rounded-md bg-amber-500 px-2.5 py-1 text-[11px] font-semibold text-black"
             >
               Overwrite theirs
