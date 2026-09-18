@@ -6,7 +6,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 
-import { withMcpProjectSuffix } from "./naming.js";
+import { withMcpProjectSuffix, findDuplicateProject } from "./naming.js";
 import { SERVICE_URL, service } from "./service.js";
 
 /**
@@ -314,7 +314,9 @@ server.registerTool(
       "that track's trackId — you need the trackId for add_clip and add_text_clip. Defaults " +
       "to 1920x1080 at 30fps. Pass a short, descriptive summary of the task as the name; " +
       'a "-MCP" suffix is appended automatically to mark the project as agent-created, so ' +
-      "do not add it yourself.",
+      "do not add it yourself. If a project with the same name already exists in the same " +
+      "folder, this returns THAT project instead of making a second one — keep editing it " +
+      "with apply_project_ops. Pass allowDuplicateName to create one anyway.",
     inputSchema: {
       name: z
         .string()
@@ -334,13 +336,52 @@ server.registerTool(
             "list_projects first and reuse an existing folder when the work is related. " +
             `Omitted means "${DEFAULT_PROJECT_FOLDER}".`,
         ),
+      allowDuplicateName: z
+        .boolean()
+        .optional()
+        .describe(
+          "Create a new project even when one of the same name already exists in the " +
+            "same folder. Default false, which returns the existing project instead.",
+        ),
     },
   },
-  async ({ name, width, height, frameRate, folder }) => {
+  async ({ name, width, height, frameRate, folder, allowDuplicateName }) => {
     try {
       // Applied here rather than trusted to the caller: see naming.js for why.
+      const projectName = withMcpProjectSuffix(name);
+
+      // Reuse rather than duplicate. An agent iterating on one idea calls this per
+      // attempt, and nothing here used to check, so the list filled with several rows
+      // sharing a name and only their uuid to tell them apart.
+      if (!allowDuplicateName) {
+        const { projects } = await service.listProjects();
+        const existing = findDuplicateProject(projects, projectName, folder);
+        if (existing) {
+          const record = await service.getProject(existing.id);
+          const existingTracks = record.project.timeline.tracks.map((track) => ({
+            trackId: track.id,
+            name: track.name,
+          }));
+          return ok(
+            `Project "${existing.name}" (${existing.id}) already exists in folder ` +
+              `"${existing.folder ?? DEFAULT_PROJECT_FOLDER}" — returning it instead of ` +
+              "creating a second one. Continue editing it with apply_project_ops, or " +
+              "call create_project again with allowDuplicateName to make a new one.",
+            {
+              projectId: existing.id,
+              name: existing.name,
+              folder: existing.folder ?? DEFAULT_PROJECT_FOLDER,
+              updatedAt: existing.updatedAt,
+              tracks: existingTracks,
+              settings: record.project.settings,
+              reusedExisting: true,
+            },
+          );
+        }
+      }
+
       const created = await service.createProject({
-        name: withMcpProjectSuffix(name),
+        name: projectName,
         width,
         height,
         frameRate,
@@ -357,6 +398,7 @@ server.registerTool(
         updatedAt: created.updatedAt,
         tracks,
         settings: created.project.settings,
+        reusedExisting: false,
       });
     } catch (error) {
       return fail(error);

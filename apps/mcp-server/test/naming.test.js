@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { MCP_PROJECT_SUFFIX, withMcpProjectSuffix } from "../src/naming.js";
+import {
+  MCP_PROJECT_SUFFIX,
+  withMcpProjectSuffix,
+  findDuplicateProject,
+} from "../src/naming.js";
 
 /**
  * The suffix rule is enforced server-side so it cannot be forgotten by a calling agent, which
@@ -42,4 +46,51 @@ test("a name that merely contains the suffix mid-string is still suffixed", () =
 
 test("the exported suffix constant is what gets applied", () => {
   assert.ok(withMcpProjectSuffix("anything").endsWith(MCP_PROJECT_SUFFIX));
+});
+
+/**
+ * Duplicate detection. The project list genuinely accumulated "Agent Built" three times
+ * and "MCP-claude-test-2-MCP" twice, because create_project minted a fresh uuid every
+ * call and compared nothing.
+ */
+
+const PROJECTS = [
+  { id: "p1", name: "Halloween - grwm-MCP", folder: "Halloween" },
+  { id: "p2", name: "Agent Built-MCP", folder: "Uncategorized" },
+  { id: "p3", name: "Intro-MCP", folder: "Client Acme" },
+];
+
+test("finds a project with the same name in the same folder", () => {
+  const found = findDuplicateProject(PROJECTS, "Agent Built-MCP", "Uncategorized");
+  assert.equal(found?.id, "p2");
+});
+
+test("treats a missing folder as the default bucket", () => {
+  assert.equal(findDuplicateProject(PROJECTS, "Agent Built-MCP", undefined)?.id, "p2");
+  assert.equal(findDuplicateProject(PROJECTS, "Agent Built-MCP", "")?.id, "p2");
+  assert.equal(findDuplicateProject(PROJECTS, "Agent Built-MCP", "   ")?.id, "p2");
+});
+
+test("ignores case and surrounding whitespace on both sides", () => {
+  assert.equal(findDuplicateProject(PROJECTS, "  agent built-mcp ", "UNCATEGORIZED")?.id, "p2");
+});
+
+test("does not match the same name in a different folder", () => {
+  // Two projects called "Intro" under different clients are different work.
+  assert.equal(findDuplicateProject(PROJECTS, "Intro-MCP", "Client Beta"), null);
+});
+
+test("does not match a different name in the same folder", () => {
+  assert.equal(findDuplicateProject(PROJECTS, "Halloween - block 2-MCP", "Halloween"), null);
+});
+
+test("returns null for a blank name or a list that is not one", () => {
+  assert.equal(findDuplicateProject(PROJECTS, "", "Halloween"), null);
+  assert.equal(findDuplicateProject(PROJECTS, "   ", "Halloween"), null);
+  assert.equal(findDuplicateProject(undefined, "Agent Built-MCP", "Uncategorized"), null);
+});
+
+test("tolerates rows without a folder, which the service reports as uncategorised", () => {
+  const rows = [{ id: "p9", name: "Loose-MCP" }];
+  assert.equal(findDuplicateProject(rows, "Loose-MCP", undefined)?.id, "p9");
 });
