@@ -188,6 +188,83 @@ export async function saveServerProject(
   return asJson(response, "Saving project");
 }
 
+/* -------------------------------------------------------------- versions */
+
+/**
+ * A point-in-time snapshot of a project.
+ *
+ * Distinct from the automatic server sync, which keeps the CURRENT state fresh and has
+ * no memory. Versions are the memory: coarse checkpoints a person can browse and go back
+ * to. The list carries metadata only - the blobs stay on the server until one is opened.
+ */
+export interface ProjectVersionSummary {
+  readonly id: string;
+  readonly projectId: string;
+  /** "manual" is a deliberate save, "auto" a checkpoint, "pre-restore" an undo point. */
+  readonly origin: "manual" | "auto" | "pre-restore";
+  readonly createdAt: number;
+  readonly sizeBytes: number;
+  readonly clipCount: number | null;
+  readonly duration: number | null;
+  readonly label: string | null;
+}
+
+export async function listProjectVersions(
+  projectId: string,
+): Promise<ProjectVersionSummary[]> {
+  const response = await fetch(
+    `${BASE}/projects/${encodeURIComponent(projectId)}/versions`,
+  );
+  const body = await asJson<{ versions: ProjectVersionSummary[] }>(
+    response,
+    "Listing versions",
+  );
+  return body.versions;
+}
+
+export async function getProjectVersion(
+  projectId: string,
+  versionId: string,
+): Promise<ProjectVersionSummary & { project: Project }> {
+  const response = await fetch(
+    `${BASE}/projects/${encodeURIComponent(projectId)}/versions/${encodeURIComponent(versionId)}`,
+  );
+  return asJson(response, "Loading version");
+}
+
+/** Takes a checkpoint of the project as the server currently holds it. */
+export async function createProjectVersion(
+  projectId: string,
+  options: { origin?: "manual" | "auto"; label?: string } = {},
+): Promise<ProjectVersionSummary> {
+  const response = await fetch(
+    `${BASE}/projects/${encodeURIComponent(projectId)}/versions`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ origin: options.origin ?? "manual", label: options.label }),
+    },
+  );
+  return asJson(response, "Saving a version");
+}
+
+/**
+ * Puts a version back as the project's current state.
+ *
+ * The server snapshots what is being replaced first and returns that as `undoPoint`, so
+ * restoring the wrong version is itself undoable.
+ */
+export async function restoreProjectVersion(
+  projectId: string,
+  versionId: string,
+): Promise<{ updatedAt: number; restoredFrom: string; undoPoint: ProjectVersionSummary }> {
+  const response = await fetch(
+    `${BASE}/projects/${encodeURIComponent(projectId)}/versions/${encodeURIComponent(versionId)}/restore`,
+    { method: "POST" },
+  );
+  return asJson(response, "Restoring the version");
+}
+
 /* ----------------------------------------------------------------- media */
 
 /**

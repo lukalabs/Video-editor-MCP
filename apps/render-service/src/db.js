@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -54,7 +55,21 @@ export function getDb() {
       updated_at       INTEGER NOT NULL
     );
 
+    CREATE TABLE IF NOT EXISTS project_versions (
+      id          TEXT PRIMARY KEY,
+      project_id  TEXT NOT NULL,
+      data        TEXT NOT NULL,
+      origin      TEXT NOT NULL,
+      created_at  INTEGER NOT NULL,
+      size_bytes  INTEGER NOT NULL,
+      clip_count  INTEGER,
+      duration    REAL,
+      label       TEXT
+    );
+
     CREATE INDEX IF NOT EXISTS idx_projects_updated ON projects(updated_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_versions_project
+      ON project_versions(project_id, created_at DESC);
   `);
 
   // Added after the table shipped, so tolerate an existing column.
@@ -215,7 +230,11 @@ export function setProjectFolder(id, folder) {
 }
 
 export function deleteProject(id) {
-  const result = getDb().prepare("DELETE FROM projects WHERE id = ?").run(id);
+  const db = getDb();
+  // Versions go with the project. The editor's delete confirmation says the deletion
+  // cannot be undone, and leaving restorable history behind would make that a lie.
+  db.prepare("DELETE FROM project_versions WHERE project_id = ?").run(id);
+  const result = db.prepare("DELETE FROM projects WHERE id = ?").run(id);
   return result.changes > 0;
 }
 
@@ -226,17 +245,27 @@ export function getProjectUpdatedAt(id) {
 }
 
 /**
- * Media ids that no surviving project's JSON mentions.
+ * Media ids that nothing restorable mentions.
  *
  * A substring match on the stored JSON is crude but safe in the direction that matters:
- * an id that appears anywhere in any project is treated as still referenced, so this
- * never deletes media that is in use. Worst case it keeps something too long.
+ * an id that appears anywhere is treated as still referenced, so this never deletes
+ * media that is in use. Worst case it keeps something too long.
+ *
+ * Version blobs count as references, not just the current project rows. A version that
+ * cannot be restored because its footage was swept is not a version, and the clip a
+ * person removed this morning is exactly the media a naive sweep would collect - the
+ * moment before they reach for the history to get it back.
  */
 export function findOrphanedMedia() {
   const db = getDb();
   const projects = db.prepare("SELECT data FROM projects").all().map((row) => row.data);
+  const versions = db
+    .prepare("SELECT data FROM project_versions")
+    .all()
+    .map((row) => row.data);
+  const referenced = [...projects, ...versions];
   const mediaIds = db.prepare("SELECT id FROM media").all().map((row) => row.id);
-  return mediaIds.filter((id) => !projects.some((data) => data.includes(id)));
+  return mediaIds.filter((id) => !referenced.some((data) => data.includes(id)));
 }
 
 /** Closes the handle, so a test (or a shutdown) can release the file. Reopens on demand. */
@@ -356,4 +385,143 @@ export function listComponentMetadata() {
     .prepare("SELECT * FROM component_metadata ORDER BY updated_at DESC")
     .all()
     .map(rowToComponentMetadata);
+}
+
+
+/* --------------------------------------------------------- project versions */
+
+/**
+ * Point-in-time snapshots of a project, so a person can get back to this morning's cut.
+ *
+ * Deliberately NOT one row per save. Automatic sync writes every few seconds; keeping
+ * each of those forever would be thousands of rows nobody can read. Versions are
+ * checkpoints: one when someone presses save, one per stretch of continuous editing, and
+ * one immediately before a restore so the restore itself can be undone.
+ *
+ * The whole project JSON is stored rather than a diff. At the ~12KB a real project
+ * serialises to, diffing saves little and buys a reconstruct step that can go wrong.
+ */
+
+export const VERSION_ORIGINS = ["manual", "auto", "pre-restore"];
+
+export function createProjectVersion({ projectId, project, origin, label }) {
+  const data = JSON.stringify(project);
+  const id = randomUUID();
+  const clipCount = countProjectClips(project);
+  const duration = Number(project?.timeline?.duration ?? 0);
+
+  getDb()
+    .prepare(
+      `INSERT INTO project_versions
+         (id, project_id, data, origin, created_at, size_bytes, clip_count, duration, label)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    )
+    .run(
+      id,
+      projectId,
+      data,
+      origin,
+      Date.now(),
+      data.length,
+      clipCount,
+      Number.isFinite(duration) ? duration : 0,
+      label ?? null,
+    );
+
+  return getProjectVersionMeta(id);
+}
+
+/** Metadata only, newest first - the list view never needs the blobs. */
+export function listProjectVersions(projectId) {
+  return getDb()
+    .prepare(
+      `SELECT id, project_id, origin, created_at, size_bytes, clip_count, duration, label
+         FROM project_versions
+        WHERE project_id = ?
+        ORDER BY created_at DESC`,
+    )
+    .all(projectId)
+    .map(toVersionMeta);
+}
+
+export function getProjectVersion(versionId) {
+  const row = getDb()
+    .prepare("SELECT * FROM project_versions WHERE id = ?")
+    .get(versionId);
+  if (!row) return null;
+  return { ...toVersionMeta(row), project: JSON.parse(row.data) };
+}
+
+export function getProjectVersionMeta(versionId) {
+  const row = getDb()
+    .prepare(
+      `SELECT id, project_id, origin, created_at, size_bytes, clip_count, duration, label
+         FROM project_versions WHERE id = ?`,
+    )
+    .get(versionId);
+  return row ? toVersionMeta(row) : null;
+}
+
+/** When this project last had a checkpoint, or null. Drives the interval rule. */
+export function getLatestProjectVersionAt(projectId) {
+  const row = getDb()
+    .prepare(
+      "SELECT created_at FROM project_versions WHERE project_id = ? ORDER BY created_at DESC LIMIT 1",
+    )
+    .get(projectId);
+  return row ? row.created_at : null;
+}
+
+export function deleteProjectVersion(versionId) {
+  const result = getDb()
+    .prepare("DELETE FROM project_versions WHERE id = ?")
+    .run(versionId);
+  return result.changes > 0;
+}
+
+/** Every version blob, for the media sweep's reference test. */
+export function listProjectVersionData() {
+  return getDb()
+    .prepare("SELECT data FROM project_versions")
+    .all()
+    .map((row) => row.data);
+}
+
+function toVersionMeta(row) {
+  return {
+    id: row.id,
+    projectId: row.project_id,
+    origin: row.origin,
+    createdAt: row.created_at,
+    sizeBytes: row.size_bytes,
+    clipCount: row.clip_count,
+    duration: row.duration,
+    label: row.label,
+  };
+}
+
+function countProjectClips(project) {
+  const tracks = project?.timeline?.tracks ?? [];
+  const timelineClips = tracks.reduce(
+    (total, track) => total + (track?.clips?.length ?? 0),
+    0,
+  );
+  const overlays =
+    (project?.textClips?.length ?? 0) +
+    (project?.shapeClips?.length ?? 0) +
+    (project?.svgClips?.length ?? 0) +
+    (project?.stickerClips?.length ?? 0);
+  return timelineClips + overlays;
+}
+
+
+/** Every version's metadata across all projects, for the retention sweep. */
+export function listAllProjectVersionMeta() {
+  return getDb()
+    .prepare(
+      `SELECT id, project_id, origin, created_at, size_bytes, clip_count, duration, label
+         FROM project_versions ORDER BY created_at DESC`,
+    )
+    .all()
+    .map(toVersionMeta);
 }

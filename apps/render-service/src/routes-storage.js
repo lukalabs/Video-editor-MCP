@@ -22,6 +22,11 @@ import {
   setProjectFolder,
   upsertComponentMetadata,
   upsertProject,
+  createProjectVersion,
+  listProjectVersions,
+  getProjectVersion,
+  getLatestProjectVersionAt,
+  VERSION_ORIGINS,
 } from "./db.js";
 
 const SAFE_EXT = /^\.[A-Za-z0-9]{1,8}$/;
@@ -162,6 +167,13 @@ export async function registerStorageRoutes(app) {
 
     const projectName =
       typeof name === "string" && name ? name : (project.name ?? "Untitled");
+
+    // A checkpoint of the state being replaced, taken before the write, so history holds
+    // what the project looked like rather than what it became. Automatic saves arrive
+    // every few seconds, so this is rate-limited by time rather than taken per save -
+    // see AUTO_VERSION_INTERVAL_MS.
+    maybeCheckpoint(request.params.id);
+
     // folder is passed through as-is: undefined leaves whatever is stored alone, so an
     // ordinary editor save cannot reset it.
     return upsertProject({ id: request.params.id, name: projectName, project, folder });
@@ -184,6 +196,112 @@ export async function registerStorageRoutes(app) {
     const moved = setProjectFolder(request.params.id, folder ?? "");
     if (!moved) return reply.code(404).send({ error: "Unknown project" });
     return moved;
+  });
+
+  /**
+   * How much editing has to pass before an automatic save also becomes a checkpoint.
+   *
+   * Server sync writes every few seconds; one version per write would be thousands of
+   * rows nobody can read. Ten minutes of actual editing is the granularity a person
+   * thinks in when they say "put it back to before lunch". Overridable for tests.
+   */
+  const AUTO_VERSION_INTERVAL_MS = Number(
+    process.env.AUTO_VERSION_INTERVAL_MS ?? 10 * 60_000,
+  );
+
+  /** Snapshots the CURRENT stored state if the last checkpoint is old enough. */
+  function maybeCheckpoint(projectId) {
+    const current = getProject(projectId);
+    if (!current) return null;
+
+    const lastAt = getLatestProjectVersionAt(projectId);
+    if (lastAt !== null && Date.now() - lastAt < AUTO_VERSION_INTERVAL_MS) {
+      return null;
+    }
+    return createProjectVersion({
+      projectId,
+      project: current.project,
+      origin: "auto",
+    });
+  }
+
+  /** Version history for a project, newest first. Metadata only - no project blobs. */
+  app.get("/projects/:id/versions", async (request, reply) => {
+    if (!getProject(request.params.id)) {
+      return reply.code(404).send({ error: "Unknown project" });
+    }
+    return { versions: listProjectVersions(request.params.id) };
+  });
+
+  /** One snapshot in full, for previewing before restoring. */
+  app.get("/projects/:id/versions/:versionId", async (request, reply) => {
+    const version = getProjectVersion(request.params.versionId);
+    if (!version || version.projectId !== request.params.id) {
+      return reply.code(404).send({ error: "Unknown version" });
+    }
+    return version;
+  });
+
+  /**
+   * An explicit checkpoint, which is what the editor's "Save now" button takes. Unlike
+   * the automatic ones this is never rate-limited: somebody asked for it.
+   */
+  app.post("/projects/:id/versions", async (request, reply) => {
+    const record = getProject(request.params.id);
+    if (!record) return reply.code(404).send({ error: "Unknown project" });
+
+    const { origin = "manual", label } = request.body ?? {};
+    if (!VERSION_ORIGINS.includes(origin)) {
+      return reply
+        .code(400)
+        .send({ error: `origin must be one of ${VERSION_ORIGINS.join(", ")}` });
+    }
+    if (label !== undefined && label !== null && typeof label !== "string") {
+      return reply.code(400).send({ error: "label must be a string" });
+    }
+
+    return reply
+      .code(201)
+      .send(
+        createProjectVersion({
+          projectId: request.params.id,
+          project: record.project,
+          origin,
+          label,
+        }),
+      );
+  });
+
+  /**
+   * Puts an old snapshot back.
+   *
+   * The state being replaced is checkpointed first, so a restore is itself undoable -
+   * restoring the wrong version must not be the thing that loses the work. The restored
+   * content then goes through the ordinary upsert, which means it is a normal current
+   * state: editable, syncable and versioned like any other.
+   */
+  app.post("/projects/:id/versions/:versionId/restore", async (request, reply) => {
+    const record = getProject(request.params.id);
+    if (!record) return reply.code(404).send({ error: "Unknown project" });
+
+    const version = getProjectVersion(request.params.versionId);
+    if (!version || version.projectId !== request.params.id) {
+      return reply.code(404).send({ error: "Unknown version" });
+    }
+
+    const undoPoint = createProjectVersion({
+      projectId: request.params.id,
+      project: record.project,
+      origin: "pre-restore",
+    });
+
+    const saved = upsertProject({
+      id: request.params.id,
+      name: version.project?.name ?? record.name,
+      project: version.project,
+    });
+
+    return { ...saved, restoredFrom: version.id, undoPoint };
   });
 
   app.delete("/projects/:id", async (request, reply) => {

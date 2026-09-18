@@ -3677,3 +3677,84 @@ The work is: mirror the files, serve them from render-service (or any static hos
 under the same `{model}/resolve/{revision}/` layout, and point `env.remoteHost` at it.
 Worth doing before anyone depends on captions in production; the files are too large
 for the git repo, so they would need a storage directory and a fetch script.
+
+## Stage 28 — automatic server saves, duplicate guard, version history
+
+### Why
+
+A day's editing sat in one browser while the server copy stayed two days old.
+Three projects had local IndexedDB autosaves ahead of their server rows, because
+saving to the server was a button someone had to remember to press.
+
+### Saving is automatic now
+
+`ServerSyncManager` rides the dirty signal the project store already emits: 2s
+after the last edit, throttled to one write per 5s while editing continues,
+backing off to 30s past 2MB. Flushes on hide, on blur, and once more during
+unload with `fetch(keepalive)` — under 64KB, which real projects are.
+
+Kept separate from `AutoSaveManager` on purpose. Local autosave is the
+last-resort net; it must not be slowed or made noisy by a flaky network, and the
+two want different cadences. They share the dirty signal and nothing else.
+
+A 409 stops the loop and surfaces rather than retrying, because auto-retrying
+with the server's newer timestamp is how another session's work disappears. The
+one exception is a phantom — the server's copy being exactly what we last sent,
+meaning our own write landed and we never saw the response — which rebases
+silently.
+
+The concurrency baseline moved from `ServerProjectsPanel`'s component state into
+the store: saving no longer depends on that panel being mounted.
+
+Pristine projects are skipped, so opening the editor creates nothing. The first
+real edit brings a project into being server-side.
+
+### Three layers, three jobs
+
+| layer | cadence | scope | job |
+|---|---|---|---|
+| IndexedDB autosave | 2s | this browser | crash recovery, works offline |
+| server sync | ~5s | current state, all devices | the server has my latest |
+| version history | ~10min + manual | history, all devices | take me back to this morning |
+
+No overlap: local is sub-second and disposable, sync has no memory, versions are
+coarse history with no current-state role.
+
+### Version history
+
+`project_versions` holds whole project JSON per checkpoint — at ~12KB a project,
+diffing saves little and buys a reconstruct step that can fail.
+
+Checkpoints, not saves: one per "Save now", one per 10 minutes of editing
+(`AUTO_VERSION_INTERVAL_MS`), one immediately before a restore. Automatic syncs
+write every few seconds and would otherwise produce thousands of unreadable rows.
+
+Restore snapshots what it replaces as `pre-restore` and writes the old content
+through the ordinary upsert, so a restore is undoable and the restored state is
+just a normal current state — editable, syncable, versionable.
+
+Retention mirrors `sweepExports`: keep the newest 30 **per project**, plus
+anything under 7 days, plus manual versions under 30 days. Per project so a busy
+one cannot evict a quiet one's history. Measured cost at 12KB/version: ~360KB per
+project at the cap, ~18MB across 50 projects — less than one exported MP4.
+
+Deleting a project deletes its versions. The delete dialog says it cannot be
+undone, and restorable history would make that a lie.
+
+**The subtle part: sweeps must treat version blobs as references.** Both
+`findOrphanedMedia` and `sweepRenderedFiles` now scan version JSON as well as the
+current project rows. The media a person removed from the timeline this morning
+is exactly what a naive sweep collects — the moment before they reach for the
+history to get it back. There is a test for precisely that.
+
+### create_project no longer mints duplicates
+
+The project list accumulated `Agent Built` three times and
+`MCP-claude-test-2-MCP` twice: `create_project` generated a fresh uuid every call
+and compared nothing. It now returns the existing project when the name and
+folder both match, with `reusedExisting: true`, and `allowDuplicateName` for when
+a second one is genuinely wanted. Matching on name *and* folder: two "Intro"
+projects under different clients are different work.
+
+Enforced server-side for the same reason the `-MCP` suffix is — a convention an
+agent has to remember is one that gets dropped.

@@ -11,7 +11,11 @@ import {
   ProjectConflictError,
   saveServerProject,
   setServerProjectFolder,
+  listProjectVersions,
+  restoreProjectVersion,
+  createProjectVersion,
   DEFAULT_PROJECT_FOLDER,
+  type ProjectVersionSummary,
   type ProjectSummary,
 } from "../../../services/server-storage";
 import { FolderPicker } from "./FolderPicker";
@@ -71,6 +75,9 @@ export const ServerProjectsPanel: React.FC = () => {
    * fires from the second button, which names the project.
    */
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  /** Which card has its history open, and that project's versions once loaded. */
+  const [historyId, setHistoryId] = useState<string | null>(null);
+  const [versions, setVersions] = useState<ProjectVersionSummary[] | null>(null);
 
   const refresh = useCallback(async () => {
     setError(null);
@@ -142,6 +149,9 @@ export const ServerProjectsPanel: React.FC = () => {
         // Tell sync about a save it did not make, so its baseline and its idea of what
         // the server holds stay correct.
         noteServerSave(result.updatedAt);
+        // A deliberate save is worth keeping, so it becomes a version. Automatic syncs
+        // do not: at one write every few seconds the history would be unreadable.
+        await createProjectVersion(full.id, { origin: "manual" }).catch(() => undefined);
         toast.success("Project saved to the server", full.name);
         await refresh();
       } catch (err) {
@@ -247,6 +257,51 @@ export const ServerProjectsPanel: React.FC = () => {
       }
     },
     [project.id, refresh],
+  );
+
+  const openHistory = useCallback(
+    async (summary: ProjectSummary) => {
+      const closing = historyId === summary.id;
+      setHistoryId(closing ? null : summary.id);
+      setVersions(null);
+      if (closing) return;
+      setMovingId(null);
+      setDeletingId(null);
+      try {
+        setVersions(await listProjectVersions(summary.id));
+      } catch (err) {
+        setVersions([]);
+        setError(err instanceof Error ? err.message : "Could not load versions");
+      }
+    },
+    [historyId],
+  );
+
+  /**
+   * Puts a version back. The server snapshots the state being replaced first, so this is
+   * itself undoable - the pre-restore point appears at the top of the list afterwards.
+   */
+  const handleRestore = useCallback(
+    async (summary: ProjectSummary, version: ProjectVersionSummary) => {
+      setBusy("Restoring…");
+      setError(null);
+      try {
+        await restoreProjectVersion(summary.id, version.id);
+        setVersions(await listProjectVersions(summary.id));
+        toast.success(
+          `Restored ${summary.name}`,
+          "The state it replaced was saved first, so this can be undone.",
+        );
+        await refresh();
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Unknown error";
+        setError(message);
+        toast.error("Could not restore the version", message);
+      } finally {
+        setBusy(null);
+      }
+    },
+    [refresh],
   );
 
   const handleOpen = useCallback(
@@ -483,7 +538,10 @@ export const ServerProjectsPanel: React.FC = () => {
                         setMovingId(opening ? summary.id : null);
                         // Only one row open per card, so an armed delete cannot sit
                         // forgotten under a move form and be hit by accident.
-                        if (opening) setDeletingId(null);
+                        if (opening) {
+                          setDeletingId(null);
+                          setHistoryId(null);
+                        }
                         // Prefilled with where it already is, so the field shows the current
                         // answer rather than an empty box. The default folder is not a real
                         // folder, so it starts blank in that case.
@@ -499,19 +557,96 @@ export const ServerProjectsPanel: React.FC = () => {
                     </button>
                     <button
                       type="button"
+                      aria-label={`Version history for ${summary.name}`}
+                      aria-expanded={historyId === summary.id}
+                      disabled={busy !== null}
+                      onClick={() => void openHistory(summary)}
+                      className="my-2 shrink-0 rounded-md border border-border/70 px-2 py-1 text-[11px] font-medium text-fg-muted"
+                    >
+                      History
+                    </button>
+                    <button
+                      type="button"
                       aria-label={`Delete project ${summary.name}`}
                       aria-expanded={deletingId === summary.id}
                       disabled={busy !== null}
                       onClick={() => {
                         const opening = deletingId !== summary.id;
                         setDeletingId(opening ? summary.id : null);
-                        if (opening) setMovingId(null);
+                        if (opening) {
+                          setMovingId(null);
+                          setHistoryId(null);
+                        }
                       }}
                       className="my-2 mr-2 shrink-0 rounded-md border border-border/70 px-2 py-1 text-[11px] font-medium text-fg-muted hover:border-red-500/60 hover:text-red-400"
                     >
                       Delete
                     </button>
                   </div>
+
+                  {historyId === summary.id && (
+                    <div className="mt-1.5 rounded-lg border border-border/70 bg-bg-2 p-2">
+                      {versions === null && (
+                        <p className="text-[11px] text-fg-muted">Loading history…</p>
+                      )}
+                      {versions?.length === 0 && (
+                        <p className="text-[11px] leading-4 text-fg-muted">
+                          No versions yet. One is kept each time you press Save now, and
+                          periodically while you edit.
+                        </p>
+                      )}
+                      {versions && versions.length > 0 && (
+                        <ul className="flex flex-col gap-1.5">
+                          {versions.map((version) => (
+                            <li
+                              key={version.id}
+                              className="flex items-center justify-between gap-2"
+                            >
+                              <div className="min-w-0">
+                                <span className="block truncate text-[11px] text-fg">
+                                  {new Date(version.createdAt).toLocaleString()}
+                                </span>
+                                <span className="block text-[10px] text-fg-muted">
+                                  <span
+                                    className={
+                                      version.origin === "manual"
+                                        ? "text-accent"
+                                        : version.origin === "pre-restore"
+                                          ? "text-amber-400"
+                                          : ""
+                                    }
+                                  >
+                                    {version.origin === "manual"
+                                      ? "Saved"
+                                      : version.origin === "pre-restore"
+                                        ? "Before restore"
+                                        : "Auto"}
+                                  </span>
+                                  {version.clipCount !== null
+                                    ? ` · ${version.clipCount} clip${version.clipCount === 1 ? "" : "s"}`
+                                    : ""}
+                                  {version.duration
+                                    ? ` · ${version.duration.toFixed(1)}s`
+                                    : ""}
+                                </span>
+                              </div>
+                              <button
+                                type="button"
+                                aria-label={`Restore version from ${new Date(
+                                  version.createdAt,
+                                ).toLocaleString()}`}
+                                disabled={busy !== null}
+                                onClick={() => void handleRestore(summary, version)}
+                                className="shrink-0 rounded-md border border-border/70 px-2 py-1 text-[10px] font-medium text-fg-muted"
+                              >
+                                Restore
+                              </button>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </div>
+                  )}
 
                   {deletingId === summary.id && (
                     <div
