@@ -6,6 +6,16 @@ export interface WhisperModelDefinition {
   readonly shortLabel: string;
   readonly downloadSize: string;
   readonly description: string;
+  /**
+   * Whether the ONNX export can return per-word timestamps.
+   *
+   * Word timings are extracted from the decoder's cross-attentions, which only the
+   * "_timestamped" builds are exported with. Asking a model without them for word
+   * timestamps fails the whole transcription ("Model outputs must contain cross
+   * attentions to extract timestamps"), so this is checked before requesting them
+   * rather than discovered at runtime.
+   */
+  readonly supportsWordTimestamps: boolean;
 }
 
 export const WHISPER_MODELS: Record<WhisperModelKey, WhisperModelDefinition> = {
@@ -15,6 +25,7 @@ export const WHISPER_MODELS: Record<WhisperModelKey, WhisperModelDefinition> = {
     shortLabel: "Large V3 Turbo",
     downloadSize: "About 760 MB",
     description: "Best local accuracy; WebGPU recommended",
+    supportsWordTimestamps: true,
   },
   fast: {
     id: "onnx-community/whisper-tiny",
@@ -22,6 +33,7 @@ export const WHISPER_MODELS: Record<WhisperModelKey, WhisperModelDefinition> = {
     shortLabel: "Whisper Tiny",
     downloadSize: "About 100 MB",
     description: "Fastest option for drafts and lower-memory devices",
+    supportsWordTimestamps: false,
   },
 };
 

@@ -7,6 +7,8 @@ import { useUIStore } from "../../../stores/ui-store";
 import { useTimelineStore } from "../../../stores/timeline-store";
 import {
   calculateSnap,
+  resolveGroupTrackShift,
+  snapTrimEdge,
   getClipStyle,
   getClipWaveformBarAmplitudes,
 } from "./utils";
@@ -97,6 +99,24 @@ export const ClipComponent: React.FC<ClipComponentProps> = ({
   const multiDragSnapshotRef = useRef<
     Array<{ clipId: string; startTime: number; trackId: string }>
   >([]);
+  /**
+   * The dragged clip's start time when the drag began.
+   *
+   * Must not be read from the `clip` prop during the drag: the move commits every
+   * frame, so the prop holds the already-moved position and the companion delta
+   * would collapse to one frame's worth of movement - which is why a multi-clip
+   * drag used to leave the other clips behind.
+   */
+  const dragBaseStartRef = useRef(clip.startTime);
+  /**
+   * Live mirrors of the two props that change identity on every committed move.
+   * The drag effect reads these instead of closing over them, so it no longer tears
+   * down and re-subscribes mid-drag (which also ended the undo group early).
+   */
+  const allTracksRef = useRef(allTracks);
+  allTracksRef.current = allTracks;
+  const trackHeightsRef = useRef(trackHeights);
+  trackHeightsRef.current = trackHeights;
   const trimStartRef = useRef<{
     mouseX: number;
     startTime: number;
@@ -172,6 +192,8 @@ export const ClipComponent: React.FC<ClipComponentProps> = ({
     setDragYOffset(0);
     setIsInvalidDrop(false);
     setIsPendingDrag(true);
+
+    dragBaseStartRef.current = clip.startTime;
 
     // If this clip is part of a multi-selection, snapshot the other
     // selected clips' start positions so we can drag them as a group.
@@ -494,7 +516,7 @@ export const ClipComponent: React.FC<ClipComponentProps> = ({
       const snapResult = calculateSnap(
         rawTime,
         clip.id,
-        allTracks,
+        allTracksRef.current,
         playheadPosition,
         dragSnapSettings,
         pixelsPerSecond,
@@ -511,8 +533,8 @@ export const ClipComponent: React.FC<ClipComponentProps> = ({
       let hoveredTrackIsLocked = false;
       let cumulativeY = 0;
 
-      for (const t of allTracks) {
-        const height = trackHeights.get(t.id) || 48;
+      for (const t of allTracksRef.current) {
+        const height = trackHeightsRef.current.get(t.id) || 48;
         if (mouseY >= cumulativeY && mouseY < cumulativeY + height) {
           hoveredTrackIsLocked = Boolean(t.locked);
           if (!t.locked && t.id !== track.id) {
@@ -534,7 +556,7 @@ export const ClipComponent: React.FC<ClipComponentProps> = ({
       // dragging lag and eventually exhaust memory. We keep the latest move
       // in a ref and flush it once per frame.
       const moveTime = snapResult.time;
-      const baseStartTime = clip.startTime;
+      const baseStartTime = dragBaseStartRef.current;
       const companions = multiDragSnapshotRef.current;
       pendingCommitRef.current = () => {
         onMoveClip(clip.id, moveTime, undefined);
@@ -577,7 +599,30 @@ export const ClipComponent: React.FC<ClipComponentProps> = ({
       pendingCommit?.();
 
       const { time, targetTrackId } = pendingDropRef.current;
-      await onMoveClip(clip.id, time, targetTrackId ?? track.id);
+      const companions = multiDragSnapshotRef.current;
+
+      // Vertical movement applies to the whole selection as one rigid shift, and is
+      // rejected outright if any clip would land on a locked track or off the ends -
+      // see resolveGroupTrackShift.
+      const { primaryTrackId, destinations } = resolveGroupTrackShift(
+        allTracksRef.current,
+        track.id,
+        targetTrackId,
+        companions,
+      );
+
+      await onMoveClip(clip.id, time, primaryTrackId);
+
+      if (companions.length > 0) {
+        const deltaTime = time - dragBaseStartRef.current;
+        for (const snap of companions) {
+          await onMoveClip(
+            snap.clipId,
+            Math.max(0, snap.startTime + deltaTime),
+            destinations.get(snap.clipId) ?? snap.trackId,
+          );
+        }
+      }
 
       setIsDragging(false);
       setDragYOffset(0);
@@ -602,14 +647,17 @@ export const ClipComponent: React.FC<ClipComponentProps> = ({
       window.removeEventListener("mouseup", handleMouseUp);
       closeGroup();
     };
+    // allTracks and trackHeights are deliberately absent: both get a new identity
+    // on every committed move, so listing them re-ran this effect every frame of a
+    // drag - re-binding the listeners and closing the undo group after the first
+    // frame. They are read through refs above instead.
   }, [
     isDragging,
     dragOffset,
     pixelsPerSecond,
     clip.id,
+    clip.duration,
     track.id,
-    allTracks,
-    trackHeights,
     timelineRef,
     playheadPosition,
     snapSettings,
@@ -624,22 +672,30 @@ export const ClipComponent: React.FC<ClipComponentProps> = ({
       const deltaX = e.clientX - trimStartRef.current.mouseX;
       const deltaTime = deltaX / pixelsPerSecond;
 
+      // The dragged edge snaps to clip edges anywhere on the timeline, not just on
+      // this track - clamping happens after, so a snap can never invert the clip.
+      const snap = snapTrimEdge(
+        trimEdge === "left"
+          ? trimStartRef.current.startTime + deltaTime
+          : trimStartRef.current.startTime +
+              trimStartRef.current.duration +
+              deltaTime,
+        clip.id,
+        allTracksRef.current,
+        snapSettings,
+        pixelsPerSecond,
+      );
+      onSnapIndicator(snap.snapped && snap.snapPoint ? snap.snapPoint.time : null);
+
       if (trimEdge === "left") {
-        const newStartTime = Math.max(
-          0,
-          trimStartRef.current.startTime + deltaTime,
-        );
+        const newStartTime = Math.max(0, snap.time);
         const maxStartTime =
           trimStartRef.current.startTime + trimStartRef.current.duration - 0.1;
         const clampedStartTime = Math.min(newStartTime, maxStartTime);
         onTrimClip(clip.id, "left", clampedStartTime);
       } else {
-        const newEndTime =
-          trimStartRef.current.startTime +
-          trimStartRef.current.duration +
-          deltaTime;
         const minEndTime = trimStartRef.current.startTime + 0.1;
-        const clampedEndTime = Math.max(newEndTime, minEndTime);
+        const clampedEndTime = Math.max(snap.time, minEndTime);
         onTrimClip(clip.id, "right", clampedEndTime);
       }
     };
@@ -647,6 +703,7 @@ export const ClipComponent: React.FC<ClipComponentProps> = ({
     const handleMouseUp = () => {
       setIsTrimming(false);
       setTrimEdge(null);
+      onSnapIndicator(null);
       document.body.style.cursor = "";
     };
 
@@ -657,7 +714,15 @@ export const ClipComponent: React.FC<ClipComponentProps> = ({
       window.removeEventListener("mousemove", handleMouseMove);
       window.removeEventListener("mouseup", handleMouseUp);
     };
-  }, [isTrimming, trimEdge, clip.id, pixelsPerSecond, onTrimClip]);
+  }, [
+    isTrimming,
+    trimEdge,
+    clip.id,
+    pixelsPerSecond,
+    onTrimClip,
+    onSnapIndicator,
+    snapSettings,
+  ]);
 
   const thumbnailCount = Math.max(1, Math.floor(width / 60));
   const clipName =

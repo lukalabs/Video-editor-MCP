@@ -74,6 +74,7 @@ import {
   type AutoSaveMetadata,
 } from "../services/auto-save";
 import { useEngineStore } from "./engine-store";
+import { serverSyncManager } from "../services/server-sync";
 import {
   createEmptyProject,
   calculateTimelineDuration,
@@ -124,6 +125,23 @@ export interface ProjectState {
   // Project data
   project: Project;
   hasOpenProject: boolean;
+  /** Live state of the automatic server save for the open project. */
+  serverSync: import("../services/server-sync").ServerSyncState;
+  /**
+   * Tells server sync which project is open and what the server's timestamp for it was
+   * when it was opened. `null` means the server has never seen this project, in which
+   * case the first real edit creates it.
+   */
+  beginServerSync: (
+    project: Project,
+    serverUpdatedAt: number | null,
+  ) => void;
+  /** Saves to the server now, skipping the debounce. Backs the "Save now" button. */
+  syncToServerNow: () => Promise<void>;
+  /** Records a save made outside the sync manager, so the baseline stays correct. */
+  noteServerSave: (updatedAt: number) => void;
+  /** Clears a surfaced conflict once the user has chosen how to resolve it. */
+  clearServerSyncConflict: (expectedUpdatedAt: number | null) => void;
 
   // Photo projects
   photoProjects: Map<string, PhotoProject>;
@@ -364,6 +382,13 @@ export interface ProjectState {
   updateTextAnimation: (
     clipId: string,
     animation: TextAnimation,
+  ) => TextClip | null;
+  setCaptionAnimation: (
+    clipId: string,
+    updates: {
+      words?: readonly import("@openreel/core").SubtitleWord[];
+      animationStyle?: import("@openreel/core").CaptionAnimationStyle;
+    },
   ) => TextClip | null;
   updateTextTransform: (
     clipId: string,
@@ -1690,6 +1715,23 @@ export const useProjectStore = create<ProjectState>()(
       // Initial state - create empty project (Requirement 1.1)
       project: createEmptyProject(),
       hasOpenProject: false,
+      serverSync: serverSyncManager.getState(),
+
+      beginServerSync: (project, serverUpdatedAt) => {
+        serverSyncManager.beginProject(project, serverUpdatedAt);
+      },
+
+      syncToServerNow: async () => {
+        await serverSyncManager.flushNow(get().getFullProject());
+      },
+
+      noteServerSave: (updatedAt: number) => {
+        serverSyncManager.noteExternalSave(get().getFullProject(), updatedAt);
+      },
+
+      clearServerSyncConflict: (expectedUpdatedAt: number | null) => {
+        serverSyncManager.clearConflict(expectedUpdatedAt);
+      },
       photoProjects: new Map(),
       actionExecutor,
       actionHistory,
@@ -1737,6 +1779,10 @@ export const useProjectStore = create<ProjectState>()(
           lastPastedClipIds: [],
           error: null,
         });
+        // A project the server has not seen yet. Sync records this as the pristine
+        // baseline, so opening a scratch project creates nothing server-side until it
+        // is actually edited.
+        serverSyncManager.beginProject(get().getFullProject(), null);
       },
 
       loadProject: (incomingProject: Project) => {
@@ -1785,6 +1831,10 @@ export const useProjectStore = create<ProjectState>()(
           lastPastedClipIds: [],
           error: null,
         });
+        // A project the server has not seen yet. Sync records this as the pristine
+        // baseline, so opening a scratch project creates nothing server-side until it
+        // is actually edited.
+        serverSyncManager.beginProject(get().getFullProject(), null);
 
         // Auto-restore placeholder assets from saved FileSystemFileHandles (same machine)
         const placeholders = fixedProject.mediaLibrary.items.filter(
@@ -2974,9 +3024,17 @@ export const useProjectStore = create<ProjectState>()(
         useProjectStore.subscribe(
           (state) => state.project,
           () => {
-            autoSaveManager.markDirty(get().getFullProject());
+            const full = get().getFullProject();
+            autoSaveManager.markDirty(full);
+            // Same dirty signal, different destination. Server sync runs on its own
+            // cadence and can fail without affecting the local safety net above.
+            serverSyncManager.markDirty(full);
           },
         );
+
+        serverSyncManager.subscribe((serverSync) => {
+          set({ serverSync });
+        });
       },
 
       checkForRecovery: async () => {
@@ -3129,6 +3187,10 @@ export const useProjectStore = create<ProjectState>()(
           templateUndoStack: [...templateUndoStack, historyEntry],
           templateRedoStack: [],
         });
+        // A project the server has not seen yet. Sync records this as the pristine
+        // baseline, so opening a scratch project creates nothing server-side until it
+        // is actually edited.
+        serverSyncManager.beginProject(get().getFullProject(), null);
 
         return applied.applicationState.applicationId;
       },

@@ -6,6 +6,7 @@ import {
   Video,
 } from "@/icons/lucide-compat";
 import { useProjectStore } from "../../stores/project-store";
+import { ServerSyncIndicator } from "./ServerSyncIndicator";
 import { useUIStore } from "../../stores/ui-store";
 import { useRouter } from "../../hooks/use-router";
 import {
@@ -445,8 +446,11 @@ export const Toolbar: React.FC = () => {
         <ProjectSwitcher />
       </div>
 
-      {/* ─── Right: export only ───────────────────────────────── */}
-      <div className="flex items-center justify-end shrink-0">
+      {/* ─── Right: sync status + export ───────────────────────── */}
+      <div className="flex items-center justify-end gap-3 shrink-0">
+        {/* Whether the server has the latest state. Saving is automatic, so this is
+            the only place a stalled or conflicted save becomes visible. */}
+        <ServerSyncIndicator />
         {/* Export */}
         {exportState.isExporting ? (
           <button

@@ -196,3 +196,66 @@ test("upsert echoes the folder only when the caller supplied one", () => {
   const without = db.upsertProject({ id: "p-echo", name: "Echo", project: project("p-echo", "Echo") });
   assert.equal("folder" in without, false, "an ordinary save should not claim to have set a folder");
 });
+
+test("setProjectFolder re-files without touching the project JSON", () => {
+  // The whole point of the narrow path: the editor's list holds summaries only, so re-filing
+  // a project it does not have loaded must not require the blob.
+  db.upsertProject({
+    id: "p-move",
+    name: "Move me",
+    project: project("p-move", "Move me"),
+    folder: "Before",
+  });
+  const before = db.getProject("p-move");
+
+  const moved = db.setProjectFolder("p-move", "After");
+  assert.equal(moved.folder, "After");
+
+  const after = db.getProject("p-move");
+  assert.equal(after.folder, "After");
+  assert.equal(after.name, "Move me");
+  // Byte-for-byte: a re-file that quietly rewrote the composition would be far worse than
+  // one that failed outright.
+  assert.deepEqual(after.project, before.project);
+});
+
+test("setProjectFolder clears back to the default on a blank folder", () => {
+  db.setProjectFolder("p-move", "");
+  assert.equal(db.getProject("p-move").folder, db.DEFAULT_PROJECT_FOLDER);
+  assert.equal(
+    db.getDb().prepare("SELECT folder FROM projects WHERE id = ?").get("p-move").folder,
+    null,
+    "a cleared folder is stored as NULL, not as the label",
+  );
+});
+
+test("setProjectFolder normalises like the upsert path", () => {
+  db.setProjectFolder("p-move", "  Spaced  ");
+  assert.equal(db.getProject("p-move").folder, "Spaced");
+  db.setProjectFolder("p-move", db.DEFAULT_PROJECT_FOLDER);
+  assert.equal(
+    db.getDb().prepare("SELECT folder FROM projects WHERE id = ?").get("p-move").folder,
+    null,
+    "the default label is never written to the column",
+  );
+});
+
+test("setProjectFolder reports an unknown project rather than inventing one", () => {
+  assert.equal(db.setProjectFolder("p-does-not-exist", "Anywhere"), null);
+  assert.equal(db.getProject("p-does-not-exist"), null);
+});
+
+test("setProjectFolder bumps updated_at", () => {
+  db.upsertProject({ id: "p-stamp", name: "Stamp", project: project("p-stamp", "Stamp") });
+  const before = db.getProject("p-stamp").updatedAt;
+  const moved = db.setProjectFolder("p-stamp", "Stamped");
+  assert.ok(moved.updatedAt >= before, `${moved.updatedAt} should be >= ${before}`);
+  assert.equal(db.getProject("p-stamp").updatedAt, moved.updatedAt);
+});
+
+test("a re-filed project shows up under its new folder in the listing", () => {
+  db.setProjectFolder("p-stamp", "Listed Here");
+  const listed = db.listProjects({ folder: "Listed Here" }).map((row) => row.id);
+  assert.deepEqual(listed, ["p-stamp"]);
+  assert.ok(db.listProjectFolders().includes("Listed Here"));
+});

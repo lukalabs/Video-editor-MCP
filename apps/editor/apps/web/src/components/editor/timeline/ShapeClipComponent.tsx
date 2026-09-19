@@ -3,7 +3,7 @@ import { ToolcraftContextMenu as ContextMenu } from "@openreel/ui";
 import { Shapes, FileCode, Smile } from "@/icons/lucide-compat";
 import type { ShapeClip, SVGClip, StickerClip, Track } from "@openreel/core";
 import { useGraphicsClipContextMenuItems } from "./GraphicsClipContextMenu";
-import { calculateSnap } from "./utils";
+import { calculateSnap, snapTrimEdge } from "./utils";
 import { useProjectStore } from "../../../stores/project-store";
 import { useTimelineStore } from "../../../stores/timeline-store";
 import { useUIStore } from "../../../stores/ui-store";
@@ -190,22 +190,30 @@ export const ShapeClipComponent: React.FC<ShapeClipComponentProps> = ({
       const deltaX = e.clientX - trimStartRef.current.mouseX;
       const deltaTime = deltaX / pixelsPerSecond;
 
+      // Same cross-track edge snapping as media clips. No snap indicator here:
+      // these overlay components have no onSnapIndicator prop, and they do not
+      // drive the indicator while moving either.
+      const snappedEdge = snapTrimEdge(
+        isTrimming === "left"
+          ? trimStartRef.current.startTime + deltaTime
+          : trimStartRef.current.startTime +
+              trimStartRef.current.duration +
+              deltaTime,
+        shapeClip.id,
+        allTracks,
+        snapSettings,
+        pixelsPerSecond,
+      );
+
       if (isTrimming === "left") {
-        const newStartTime = Math.max(
-          0,
-          trimStartRef.current.startTime + deltaTime,
-        );
+        const newStartTime = Math.max(0, snappedEdge.time);
         const maxStartTime =
           trimStartRef.current.startTime + trimStartRef.current.duration - 0.1;
         const clampedStartTime = Math.min(newStartTime, maxStartTime);
         onTrim(shapeClip.id, "left", clampedStartTime);
       } else {
-        const newEndTime =
-          trimStartRef.current.startTime +
-          trimStartRef.current.duration +
-          deltaTime;
         const minEndTime = trimStartRef.current.startTime + 0.1;
-        const clampedEndTime = Math.max(newEndTime, minEndTime);
+        const clampedEndTime = Math.max(snappedEdge.time, minEndTime);
         onTrim(shapeClip.id, "right", clampedEndTime);
       }
     };
@@ -224,7 +232,15 @@ export const ShapeClipComponent: React.FC<ShapeClipComponentProps> = ({
       window.removeEventListener("mousemove", handleMouseMove);
       window.removeEventListener("mouseup", handleMouseUp);
     };
-  }, [isTrimming, shapeClip.id, pixelsPerSecond, onTrim, endTimingGesture]);
+  }, [
+    isTrimming,
+    shapeClip.id,
+    pixelsPerSecond,
+    onTrim,
+    endTimingGesture,
+    allTracks,
+    snapSettings,
+  ]);
 
   const isShape = shapeClip.type === "shape";
   const isSticker = shapeClip.type === "sticker" || shapeClip.type === "emoji";

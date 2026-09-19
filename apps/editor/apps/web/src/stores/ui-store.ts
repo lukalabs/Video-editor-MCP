@@ -191,8 +191,18 @@ const DEFAULT_SNAP_SETTINGS: SnapSettings = {
   snapToPlayhead: true,
   snapToMarkers: true,
   gridSize: 1, // 1 second
-  snapThreshold: 40,
+  /**
+   * Pixels of slack before a drag snaps. 40 was grabby enough that an edge could be
+   * pulled four seconds at a typical zoom; Premiere and Resolve sit around ten, which
+   * is what edge trimming needs to stay controllable. Still a constant rather than a
+   * setting - `setSnapThreshold` exists for a future preferences UI, but nothing calls
+   * it today, so there is no user-chosen value to respect.
+   */
+  snapThreshold: 10,
 };
+
+/** The old default, rewritten on upgrade - see the persist migration below. */
+const LEGACY_SNAP_THRESHOLD = 40;
 
 const DEFAULT_PANELS: Record<PanelId, PanelState> = {
   mediaLibrary: { visible: true, width: 300 },
@@ -592,7 +602,7 @@ export const useUIStore = create<UIState>()(
       }),
       {
         name: "openreel-ui-preferences",
-        version: 2,
+        version: 3,
         migrate: (persisted: unknown, version: number) => {
           const state = persisted as Record<string, unknown>;
           if (version === 0) {
@@ -604,6 +614,18 @@ export const useUIStore = create<UIState>()(
               panels.agentChat = DEFAULT_PANELS.agentChat;
             }
             state.panels = panels;
+          }
+          if (version < 3) {
+            // snapSettings is persisted, so a lowered default would never reach
+            // anyone who has used the editor before. Only the old default is
+            // rewritten: a value someone deliberately set is left alone.
+            const snapSettings = state.snapSettings as SnapSettings | undefined;
+            if (snapSettings?.snapThreshold === LEGACY_SNAP_THRESHOLD) {
+              state.snapSettings = {
+                ...snapSettings,
+                snapThreshold: DEFAULT_SNAP_SETTINGS.snapThreshold,
+              };
+            }
           }
           return state;
         },

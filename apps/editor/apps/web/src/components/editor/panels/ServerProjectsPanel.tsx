@@ -3,14 +3,22 @@ import React, { useCallback, useEffect, useState } from "react";
 import { refreshRegistry } from "../../../services/component-library-clips";
 import { saveMediaBlob } from "../../../services/media-storage";
 import {
+  deleteServerProject,
   fetchServerMedia,
   listServerProjects,
   loadServerProject,
+  listServerProjectFolders,
   ProjectConflictError,
   saveServerProject,
+  setServerProjectFolder,
+  listProjectVersions,
+  restoreProjectVersion,
+  createProjectVersion,
   DEFAULT_PROJECT_FOLDER,
+  type ProjectVersionSummary,
   type ProjectSummary,
 } from "../../../services/server-storage";
+import { FolderPicker } from "./FolderPicker";
 import { toast } from "../../../stores/notification-store";
 import { useProjectStore } from "../../../stores/project-store";
 
@@ -34,19 +42,55 @@ export const ServerProjectsPanel: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   /**
-   * The `updatedAt` this session last saw for the open project. Sent as an
-   * optimistic-concurrency guard so a save cannot silently clobber someone else's newer
-   * one; `null` means "no baseline", which saves unguarded.
+   * The concurrency baseline and any conflict now live in the store, not here: saving
+   * happens automatically whether or not this panel is mounted, so a baseline held in
+   * component state would be lost the moment the panel closed.
    */
-  const [knownUpdatedAt, setKnownUpdatedAt] = useState<number | null>(null);
-  const [conflict, setConflict] = useState<ProjectConflictError | null>(null);
+  const serverSync = useProjectStore((state) => state.serverSync);
+  const beginServerSync = useProjectStore((state) => state.beginServerSync);
+  const noteServerSave = useProjectStore((state) => state.noteServerSave);
+  const clearServerSyncConflict = useProjectStore(
+    (state) => state.clearServerSyncConflict,
+  );
+  const knownUpdatedAt = serverSync.expectedUpdatedAt;
+  const conflict = serverSync.conflict;
   /** "" means every folder. Filtering happens client-side: the list is already loaded. */
   const [folderFilter, setFolderFilter] = useState("");
+  /**
+   * Folders as the SERVER reports them, from GET /projects/folders — deliberately not the
+   * `folders` list derived from the loaded projects below. The two agree today, but the
+   * pickers should offer what the server knows, so a folder created by another client (or by
+   * an agent over MCP) shows up on the next refresh without depending on this browser
+   * having loaded a project from it.
+   */
+  const [serverFolders, setServerFolders] = useState<string[]>([]);
+  /** The folder the next save files the project under. "" leaves it where it is. */
+  const [saveFolder, setSaveFolder] = useState("");
+  /** Which card has its re-file row open, and what has been typed into it. */
+  const [movingId, setMovingId] = useState<string | null>(null);
+  const [moveFolder, setMoveFolder] = useState("");
+  /**
+   * Which card has its delete confirmation open. Deleting is irreversible and sweeps the
+   * project's media with it, so the button only ever arms the confirm row — the DELETE
+   * fires from the second button, which names the project.
+   */
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  /** Which card has its history open, and that project's versions once loaded. */
+  const [historyId, setHistoryId] = useState<string | null>(null);
+  const [versions, setVersions] = useState<ProjectVersionSummary[] | null>(null);
 
   const refresh = useCallback(async () => {
     setError(null);
     try {
-      setProjects(await listServerProjects());
+      // Both in one pass: the list drives the grouped display, the folder list drives the
+      // pickers. Fetched together so a newly created folder cannot be offered by one and
+      // missing from the other.
+      const [list, folderNames] = await Promise.all([
+        listServerProjects(),
+        listServerProjectFolders(),
+      ]);
+      setProjects(list);
+      setServerFolders(folderNames);
     } catch (err) {
       setProjects(null);
       setError(err instanceof Error ? err.message : "Could not reach the server");
@@ -95,14 +139,23 @@ export const ServerProjectsPanel: React.FC = () => {
         // getFullProject() merges in text/shape/SVG/sticker clips, which live in the
         // engines rather than the store (see Stage 1 notes).
         const full = getFullProject();
-        const result = await saveServerProject(full, force ? null : knownUpdatedAt);
-        setKnownUpdatedAt(result.updatedAt);
-        setConflict(null);
+        // Only sent when the picker has something in it: an empty field means "leave the
+        // stored folder alone", which is what an ordinary save should do.
+        const result = await saveServerProject(
+          full,
+          force ? null : knownUpdatedAt,
+          saveFolder.trim() === "" ? undefined : saveFolder.trim(),
+        );
+        // Tell sync about a save it did not make, so its baseline and its idea of what
+        // the server holds stay correct.
+        noteServerSave(result.updatedAt);
+        // A deliberate save is worth keeping, so it becomes a version. Automatic syncs
+        // do not: at one write every few seconds the history would be unreadable.
+        await createProjectVersion(full.id, { origin: "manual" }).catch(() => undefined);
         toast.success("Project saved to the server", full.name);
         await refresh();
       } catch (err) {
         if (err instanceof ProjectConflictError) {
-          setConflict(err);
           toast.error(
             "Someone else saved this project",
             "Reload theirs, or overwrite it from the panel.",
@@ -116,7 +169,139 @@ export const ServerProjectsPanel: React.FC = () => {
         setBusy(null);
       }
     },
-    [getFullProject, knownUpdatedAt, refresh],
+    [getFullProject, knownUpdatedAt, noteServerSave, refresh, saveFolder],
+  );
+
+  /**
+   * Re-files one project. Sends only the folder, over the narrow route — the list holds
+   * summaries, so a full PUT would mean fetching the whole project to change one column.
+   */
+  const handleMove = useCallback(
+    async (summary: ProjectSummary, folder: string) => {
+      setBusy("Moving…");
+      setError(null);
+      try {
+        const moved = await setServerProjectFolder(summary.id, folder.trim());
+        setMovingId(null);
+        setMoveFolder("");
+        toast.success(`Moved to ${moved.folder}`, summary.name);
+        await refresh();
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Unknown error";
+        setError(message);
+        toast.error("Could not move the project", message);
+      } finally {
+        setBusy(null);
+      }
+    },
+    [refresh],
+  );
+
+  /**
+   * Deletes one project, after the card's confirm row has been armed.
+   *
+   * Deleting the project that is currently OPEN deliberately does not reset the editor.
+   * The server copy and the in-memory one are separate things: wiping the timeline because
+   * a server row went away would destroy unsaved work to enact a delete the user asked for
+   * on the server, and there is no undo. So the editing session is left exactly as it is
+   * and only the baseline is dropped — `knownUpdatedAt` pointed at a row that no longer
+   * exists, and a save with a stale baseline would be a guard against nothing. With it
+   * cleared, "Save to server" simply re-creates the project (PUT is an upsert). Media is
+   * the one asymmetry: the sweep took the bytes the deleted project alone referenced, so a
+   * re-save uploads JSON referencing media the server no longer has until those items are
+   * re-imported. The toast says as much rather than hiding it.
+   */
+  const handleDelete = useCallback(
+    async (summary: ProjectSummary) => {
+      setBusy("Deleting…");
+      setError(null);
+      try {
+        const result = await deleteServerProject(summary.id);
+        setDeletingId(null);
+
+        if (summary.id === project.id) {
+          // The row is gone, so the guard has nothing to guard against; the next save
+          // re-creates the project through the upsert.
+          clearServerSyncConflict(null);
+        }
+
+        const swept = result.orphanedMediaRemoved.length;
+        toast.success(
+          `Deleted ${summary.name}`,
+          [
+            swept > 0
+              ? swept === 1
+                ? "1 media file nothing else referenced was removed too."
+                : `${swept} media files nothing else referenced were removed too.`
+              : null,
+            summary.id === project.id
+              ? "Still open here — saving will re-create it on the server."
+              : null,
+          ]
+            .filter(Boolean)
+            .join(" ") || undefined,
+        );
+        await refresh();
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Unknown error";
+        // Refresh before reporting, not after: the likeliest failure is a 404 because
+        // someone else already deleted it, and re-listing makes that ghost card go away
+        // instead of leaving a row that errors every time it is pressed. `refresh` clears
+        // the error itself, so the message is set once it has finished.
+        setDeletingId(null);
+        await refresh();
+        setError(message);
+        toast.error("Could not delete the project", message);
+      } finally {
+        setBusy(null);
+      }
+    },
+    [project.id, refresh],
+  );
+
+  const openHistory = useCallback(
+    async (summary: ProjectSummary) => {
+      const closing = historyId === summary.id;
+      setHistoryId(closing ? null : summary.id);
+      setVersions(null);
+      if (closing) return;
+      setMovingId(null);
+      setDeletingId(null);
+      try {
+        setVersions(await listProjectVersions(summary.id));
+      } catch (err) {
+        setVersions([]);
+        setError(err instanceof Error ? err.message : "Could not load versions");
+      }
+    },
+    [historyId],
+  );
+
+  /**
+   * Puts a version back. The server snapshots the state being replaced first, so this is
+   * itself undoable - the pre-restore point appears at the top of the list afterwards.
+   */
+  const handleRestore = useCallback(
+    async (summary: ProjectSummary, version: ProjectVersionSummary) => {
+      setBusy("Restoring…");
+      setError(null);
+      try {
+        await restoreProjectVersion(summary.id, version.id);
+        setVersions(await listProjectVersions(summary.id));
+        toast.success(
+          `Restored ${summary.name}`,
+          "The state it replaced was saved first, so this can be undone.",
+        );
+        await refresh();
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Unknown error";
+        setError(message);
+        toast.error("Could not restore the version", message);
+      } finally {
+        setBusy(null);
+      }
+    },
+    [refresh],
   );
 
   const handleOpen = useCallback(
@@ -145,9 +330,13 @@ export const ServerProjectsPanel: React.FC = () => {
         );
 
         const missing = items.filter((item) => item.isPlaceholder).length;
-        loadProject({ ...incoming, mediaLibrary: { items } });
-        setKnownUpdatedAt(record.updatedAt);
-        setConflict(null);
+        const opened = { ...incoming, mediaLibrary: { items } };
+        loadProject(opened);
+        // From here on this project saves itself; the timestamp is the baseline that
+        // makes those saves safe.
+        // getFullProject(), not `opened`: sync hashes what the store plus the engines
+        // hold, and a baseline hashed from a different shape would look like an edit.
+        beginServerSync(getFullProject(), record.updatedAt);
         await refreshRegistry();
 
         toast.success(
@@ -177,14 +366,14 @@ export const ServerProjectsPanel: React.FC = () => {
       <div className="flex gap-2">
         <button
           type="button"
-          aria-label="Save project to server"
+          aria-label="Save project to server now"
           disabled={busy !== null}
           onClick={() => void handleSave(false)}
           className={`flex-1 rounded-lg px-3 py-2 text-[13px] font-semibold ${
             busy ? "bg-bg-2 text-fg-muted" : "bg-accent text-white"
           }`}
         >
-          {busy === "Saving…" ? "Saving…" : "Save to server"}
+          {busy === "Saving…" ? "Saving…" : "Save now"}
         </button>
         <button
           type="button"
@@ -195,6 +384,22 @@ export const ServerProjectsPanel: React.FC = () => {
         >
           Refresh
         </button>
+      </div>
+
+      <div className="mt-2">
+        <FolderPicker
+          id="server-projects-save-folder"
+          label="Folder"
+          ariaLabel="Save into folder"
+          value={saveFolder}
+          onChange={setSaveFolder}
+          options={serverFolders}
+          disabled={busy !== null}
+        />
+        <p className="mt-1 text-[11px] leading-4 text-fg-muted">
+          Pick an existing folder or type a new one. Leave it blank to keep this project
+          where it already is.
+        </p>
       </div>
 
       <p className="mt-2 text-[11px] text-fg-muted">
@@ -223,7 +428,10 @@ export const ServerProjectsPanel: React.FC = () => {
               type="button"
               aria-label="Overwrite the server copy"
               disabled={busy !== null}
-              onClick={() => void handleSave(true)}
+              onClick={() => {
+                clearServerSyncConflict(null);
+                void handleSave(true);
+              }}
               className="rounded-md bg-amber-500 px-2.5 py-1 text-[11px] font-semibold text-black"
             >
               Overwrite theirs
@@ -295,26 +503,229 @@ export const ServerProjectsPanel: React.FC = () => {
             <ul className="flex flex-col gap-2">
               {grouped.get(folder)!.map((summary) => (
                 <li key={summary.id}>
-                  <button
-                    type="button"
-                    aria-label={`Open server project ${summary.name}`}
-                    disabled={busy !== null}
-                    onClick={() => void handleOpen(summary)}
-                    className={`w-full rounded-lg border p-3 text-left transition-colors ${
+                  {/* Open and Move are siblings rather than nested: the card used to be one
+                      big button, and a button inside a button is invalid. */}
+                  <div
+                    className={`flex items-start gap-1 rounded-lg border transition-colors ${
                       summary.id === project.id
                         ? "border-accent bg-selected"
                         : "border-border/70 bg-bg-2"
                     }`}
                   >
-                    <span className="block text-[13px] font-semibold text-fg">
-                      {summary.name}
-                    </span>
-                    <span className="mt-0.5 block text-[11px] text-fg-muted">
-                      {summary.folder} · updated{" "}
-                      {new Date(summary.updatedAt).toLocaleString()}
-                      {summary.id === project.id ? " · open" : ""}
-                    </span>
-                  </button>
+                    <button
+                      type="button"
+                      aria-label={`Open server project ${summary.name}`}
+                      disabled={busy !== null}
+                      onClick={() => void handleOpen(summary)}
+                      className="min-w-0 flex-1 p-3 text-left"
+                    >
+                      <span className="block truncate text-[13px] font-semibold text-fg">
+                        {summary.name}
+                      </span>
+                      <span className="mt-0.5 block text-[11px] text-fg-muted">
+                        {summary.folder} · updated{" "}
+                        {new Date(summary.updatedAt).toLocaleString()}
+                        {summary.id === project.id ? " · open" : ""}
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      aria-label={`Move project ${summary.name} to a folder`}
+                      aria-expanded={movingId === summary.id}
+                      disabled={busy !== null}
+                      onClick={() => {
+                        const opening = movingId !== summary.id;
+                        setMovingId(opening ? summary.id : null);
+                        // Only one row open per card, so an armed delete cannot sit
+                        // forgotten under a move form and be hit by accident.
+                        if (opening) {
+                          setDeletingId(null);
+                          setHistoryId(null);
+                        }
+                        // Prefilled with where it already is, so the field shows the current
+                        // answer rather than an empty box. The default folder is not a real
+                        // folder, so it starts blank in that case.
+                        setMoveFolder(
+                          opening && summary.folder !== DEFAULT_PROJECT_FOLDER
+                            ? summary.folder
+                            : "",
+                        );
+                      }}
+                      className="m-2 shrink-0 rounded-md border border-border/70 px-2 py-1 text-[11px] font-medium text-fg-muted"
+                    >
+                      Move
+                    </button>
+                    <button
+                      type="button"
+                      aria-label={`Version history for ${summary.name}`}
+                      aria-expanded={historyId === summary.id}
+                      disabled={busy !== null}
+                      onClick={() => void openHistory(summary)}
+                      className="my-2 shrink-0 rounded-md border border-border/70 px-2 py-1 text-[11px] font-medium text-fg-muted"
+                    >
+                      History
+                    </button>
+                    <button
+                      type="button"
+                      aria-label={`Delete project ${summary.name}`}
+                      aria-expanded={deletingId === summary.id}
+                      disabled={busy !== null}
+                      onClick={() => {
+                        const opening = deletingId !== summary.id;
+                        setDeletingId(opening ? summary.id : null);
+                        if (opening) {
+                          setMovingId(null);
+                          setHistoryId(null);
+                        }
+                      }}
+                      className="my-2 mr-2 shrink-0 rounded-md border border-border/70 px-2 py-1 text-[11px] font-medium text-fg-muted hover:border-red-500/60 hover:text-red-400"
+                    >
+                      Delete
+                    </button>
+                  </div>
+
+                  {historyId === summary.id && (
+                    <div className="mt-1.5 rounded-lg border border-border/70 bg-bg-2 p-2">
+                      {versions === null && (
+                        <p className="text-[11px] text-fg-muted">Loading history…</p>
+                      )}
+                      {versions?.length === 0 && (
+                        <p className="text-[11px] leading-4 text-fg-muted">
+                          No versions yet. One is kept each time you press Save now, and
+                          periodically while you edit.
+                        </p>
+                      )}
+                      {versions && versions.length > 0 && (
+                        <ul className="flex flex-col gap-1.5">
+                          {versions.map((version) => (
+                            <li
+                              key={version.id}
+                              className="flex items-center justify-between gap-2"
+                            >
+                              <div className="min-w-0">
+                                <span className="block truncate text-[11px] text-fg">
+                                  {new Date(version.createdAt).toLocaleString()}
+                                </span>
+                                <span className="block text-[10px] text-fg-muted">
+                                  <span
+                                    className={
+                                      version.origin === "manual"
+                                        ? "text-accent"
+                                        : version.origin === "pre-restore"
+                                          ? "text-amber-400"
+                                          : ""
+                                    }
+                                  >
+                                    {version.origin === "manual"
+                                      ? "Saved"
+                                      : version.origin === "pre-restore"
+                                        ? "Before restore"
+                                        : "Auto"}
+                                  </span>
+                                  {version.clipCount !== null
+                                    ? ` · ${version.clipCount} clip${version.clipCount === 1 ? "" : "s"}`
+                                    : ""}
+                                  {version.duration
+                                    ? ` · ${version.duration.toFixed(1)}s`
+                                    : ""}
+                                </span>
+                              </div>
+                              <button
+                                type="button"
+                                aria-label={`Restore version from ${new Date(
+                                  version.createdAt,
+                                ).toLocaleString()}`}
+                                disabled={busy !== null}
+                                onClick={() => void handleRestore(summary, version)}
+                                className="shrink-0 rounded-md border border-border/70 px-2 py-1 text-[10px] font-medium text-fg-muted"
+                              >
+                                Restore
+                              </button>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </div>
+                  )}
+
+                  {deletingId === summary.id && (
+                    <div
+                      className="mt-1.5 rounded-lg border border-red-500/60 bg-red-500/10 p-2"
+                      role="alert"
+                    >
+                      <p className="text-[12px] leading-snug text-fg">
+                        Delete <span className="font-semibold">{summary.name}</span> from
+                        the server?
+                      </p>
+                      <p className="mt-0.5 text-[11px] leading-4 text-fg-muted">
+                        This cannot be undone, and media only this project uses is deleted
+                        with it.
+                        {summary.id === project.id
+                          ? " It stays open in the editor — saving would re-create it."
+                          : ""}
+                      </p>
+                      <div className="mt-2 flex gap-2">
+                        <button
+                          type="button"
+                          aria-label={`Confirm deleting ${summary.name}`}
+                          disabled={busy !== null}
+                          onClick={() => void handleDelete(summary)}
+                          className="rounded-md bg-red-500 px-2.5 py-1 text-[11px] font-semibold text-white"
+                        >
+                          Delete
+                        </button>
+                        <button
+                          type="button"
+                          aria-label={`Cancel deleting ${summary.name}`}
+                          disabled={busy !== null}
+                          onClick={() => setDeletingId(null)}
+                          className="rounded-md border border-border/70 px-2.5 py-1 text-[11px] font-medium text-fg-muted"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {movingId === summary.id && (
+                    <div className="mt-1.5 rounded-lg border border-border/70 bg-bg-2 p-2">
+                      <FolderPicker
+                        id={`server-projects-move-${summary.id}`}
+                        label="To"
+                        ariaLabel={`New folder for ${summary.name}`}
+                        value={moveFolder}
+                        onChange={setMoveFolder}
+                        options={serverFolders}
+                        disabled={busy !== null}
+                      />
+                      <div className="mt-2 flex gap-2">
+                        <button
+                          type="button"
+                          aria-label={`Confirm moving ${summary.name}`}
+                          disabled={busy !== null}
+                          onClick={() => void handleMove(summary, moveFolder)}
+                          className="rounded-md bg-accent px-2.5 py-1 text-[11px] font-semibold text-white"
+                        >
+                          Move
+                        </button>
+                        <button
+                          type="button"
+                          aria-label={`Cancel moving ${summary.name}`}
+                          disabled={busy !== null}
+                          onClick={() => {
+                            setMovingId(null);
+                            setMoveFolder("");
+                          }}
+                          className="rounded-md border border-border/70 px-2.5 py-1 text-[11px] font-medium text-fg-muted"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                      <p className="mt-1.5 text-[11px] leading-4 text-fg-muted">
+                        Blank moves it back to {DEFAULT_PROJECT_FOLDER}.
+                      </p>
+                    </div>
+                  )}
                 </li>
               ))}
             </ul>

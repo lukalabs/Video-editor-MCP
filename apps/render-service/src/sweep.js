@@ -7,6 +7,9 @@ import {
   findOrphanedMedia,
   listComponentMetadata,
   listProjectData,
+  listProjectVersionData,
+  listAllProjectVersionMeta,
+  deleteProjectVersion,
 } from "./db.js";
 
 /**
@@ -77,7 +80,9 @@ export async function sweepRenderedFiles({ minAgeMinutes = 60, dryRun = false } 
   for (const entry of listComponentMetadata()) {
     if (entry.renderedFileId) referenced.add(String(entry.renderedFileId));
   }
-  const projectBlobs = listProjectData();
+  // Versions count as references here too: a restorable version that points at a
+  // rendered component whose file has been collected restores to a hole.
+  const projectBlobs = [...listProjectData(), ...listProjectVersionData()];
 
   const cutoff = Date.now() - minAgeMinutes * 60_000;
   const removed = [];
@@ -122,10 +127,58 @@ export async function sweepExports({ keep = 10, maxAgeHours = 24 * 7, dryRun = f
   return { removed, bytes };
 }
 
+/**
+ * Retention for version history, shaped like the exports sweep: keep the newest `keep`
+ * per project, plus anything younger than `maxAgeHours`, and delete the rest.
+ *
+ * Manual versions get a longer floor of their own. An automatic checkpoint is the clock
+ * ticking; a manual save is somebody deciding this state was worth keeping, and those two
+ * should not expire at the same rate.
+ *
+ * Per project, not globally: a busy project must not evict a quiet one's entire history.
+ */
+export function sweepProjectVersions({
+  keep = 30,
+  maxAgeHours = 24 * 7,
+  manualMaxAgeHours = 24 * 30,
+  dryRun = false,
+} = {}) {
+  const cutoff = Date.now() - maxAgeHours * 3_600_000;
+  const manualCutoff = Date.now() - manualMaxAgeHours * 3_600_000;
+
+  const byProject = new Map();
+  for (const version of listAllProjectVersionMeta()) {
+    const list = byProject.get(version.projectId) ?? [];
+    list.push(version);
+    byProject.set(version.projectId, list);
+  }
+
+  const removed = [];
+  let bytes = 0;
+
+  for (const versions of byProject.values()) {
+    const newestFirst = versions.sort((a, b) => b.createdAt - a.createdAt);
+    for (const [index, version] of newestFirst.entries()) {
+      if (index < keep) continue;
+      const floor = version.origin === "manual" ? manualCutoff : cutoff;
+      if (version.createdAt > floor) continue;
+
+      if (!dryRun) deleteProjectVersion(version.id);
+      removed.push(version.id);
+      bytes += version.sizeBytes ?? 0;
+    }
+  }
+
+  return { removed, bytes };
+}
+
 /** All three, in one report. */
 export async function sweepAll(options = {}) {
   const { dryRun = false, rendered = {}, exports: exportOptions = {} } = options;
 
+  // Versions first: they hold media references, so pruning them before the media sweep
+  // lets the media a dropped version was the last holder of go in the same pass.
+  const versionsResult = sweepProjectVersions({ ...(options.versions ?? {}), dryRun });
   const media = await sweepOrphanedMedia({ dryRun });
   const renderedResult = await sweepRenderedFiles({ ...rendered, dryRun });
   const exportsResult = await sweepExports({ ...exportOptions, dryRun });
@@ -133,10 +186,13 @@ export async function sweepAll(options = {}) {
   return {
     dryRun,
     orphanedMediaRemoved: media,
+    versionsRemoved: versionsResult.removed,
+    versionsBytesFreed: versionsResult.bytes,
     renderedRemoved: renderedResult.removed,
     renderedBytesFreed: renderedResult.bytes,
     exportsRemoved: exportsResult.removed,
     exportsBytesFreed: exportsResult.bytes,
-    totalBytesFreed: renderedResult.bytes + exportsResult.bytes,
+    totalBytesFreed:
+      renderedResult.bytes + exportsResult.bytes + versionsResult.bytes,
   };
 }

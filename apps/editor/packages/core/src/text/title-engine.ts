@@ -1,4 +1,10 @@
-import type { Transform, Keyframe, ClipMetadata } from "../types/timeline";
+import type {
+  Transform,
+  Keyframe,
+  ClipMetadata,
+  SubtitleWord,
+  CaptionAnimationStyle,
+} from "../types/timeline";
 import type {
   TextClip,
   TextStyle,
@@ -10,6 +16,10 @@ import type {
 } from "./types";
 import { DEFAULT_TEXT_STYLE, DEFAULT_TEXT_TRANSFORM } from "./types";
 import { textAnimationEngine } from "./text-animation";
+import {
+  renderAnimatedCaption,
+  MAX_WORD_SEGMENT_SCALE,
+} from "./caption-animation-renderer";
 import { MotionShaderRenderer } from "../motion/motion-shader-renderer";
 import { getMotionShaderDef } from "../motion/shaders";
 
@@ -23,6 +33,9 @@ export interface CreateTextClipOptions {
   transform?: Partial<Transform>;
   animation?: TextAnimation;
   metadata?: ClipMetadata;
+  /** Clip-relative per-word timings for caption animation. */
+  words?: readonly SubtitleWord[];
+  animationStyle?: CaptionAnimationStyle;
 }
 
 export interface UpdateTextClipOptions {
@@ -41,6 +54,9 @@ export interface UpdateTextClipOptions {
   metadata?: ClipMetadata;
   /** Set or unset 3D extrusion settings for the text. */
   text3d?: import("./types").Text3DSettings | undefined;
+  /** Clip-relative per-word timings for caption animation. */
+  words?: readonly SubtitleWord[];
+  animationStyle?: CaptionAnimationStyle;
 }
 
 export class TitleEngine {
@@ -87,6 +103,8 @@ export class TitleEngine {
       style,
       transform,
       animation: options.animation,
+      words: options.words,
+      animationStyle: options.animationStyle,
       keyframes: [],
       metadata: options.metadata,
     };
@@ -140,6 +158,8 @@ export class TitleEngine {
         updates.behindSubject ?? existing.behindSubject,
       metadata: updates.metadata ?? existing.metadata,
       text3d: "text3d" in updates ? updates.text3d : existing.text3d,
+      words: updates.words ?? existing.words,
+      animationStyle: updates.animationStyle ?? existing.animationStyle,
     };
 
     this.textClips.set(id, updatedClip);
@@ -301,6 +321,21 @@ export class TitleEngine {
       ctx.fillRect(-bgWidth / 2, -bgHeight / 2, bgWidth, bgHeight);
     }
 
+    // Word-timed captions take over the text drawing entirely: the words carry
+    // their own per-word colour, scale and offset, so neither the per-character
+    // animation below nor the plain line drawing applies.
+    //
+    // This lives in the title engine on purpose. Both the live preview and the
+    // export render text through renderText, so implementing it here means the two
+    // cannot drift - the animated-caption code used to exist only on the preview
+    // side, which made captions animate on screen and export as flat text.
+    if (this.hasWordTimedCaption(clip)) {
+      this.drawWordTimedCaption(ctx, clip, style, time, opacity, lineHeight);
+      ctx.restore();
+      this.applyTextShader(canvas, ctx, style.shader, time, width, height);
+      return { canvas, width, height, textMetrics: metrics };
+    }
+
     if (characterStates && characterStates.length > 0) {
       let charIdx = 0;
       for (let i = 0; i < lines.length; i++) {
@@ -379,6 +414,120 @@ export class TitleEngine {
       height,
       textMetrics: metrics,
     };
+  }
+
+  /** True when this clip should draw as a word-timed caption rather than plain text. */
+  private hasWordTimedCaption(clip: TextClip): boolean {
+    return Boolean(
+      clip.words &&
+        clip.words.length > 0 &&
+        clip.animationStyle &&
+        clip.animationStyle !== "none",
+    );
+  }
+
+  /**
+   * Draws one caption cue as a row of individually animated words.
+   *
+   * `clip.words` is clip-relative, so the synthetic subtitle handed to the shared
+   * caption renderer spans 0..duration and is asked for the clip-local time. That
+   * keeps this engine ignorant of where the clip sits on the timeline.
+   *
+   * Single line by design: cues reach here already split to one line each, and a
+   * word row that re-wrapped mid-animation would reflow as words changed scale.
+   */
+  private drawWordTimedCaption(
+    ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D,
+    clip: TextClip,
+    style: TextStyle,
+    clipLocalTime: number,
+    opacity: number,
+    lineHeight: number,
+  ): void {
+    const frame = renderAnimatedCaption(
+      {
+        id: clip.id,
+        text: clip.text,
+        startTime: 0,
+        endTime: clip.duration,
+        words: clip.words ? [...clip.words] : undefined,
+        animationStyle: clip.animationStyle,
+        style: {
+          fontFamily: style.fontFamily,
+          fontSize: style.fontSize,
+          color: style.color,
+          backgroundColor: style.backgroundColor ?? "transparent",
+          position: "bottom",
+          highlightColor: style.highlightColor,
+          upcomingColor: style.upcomingColor,
+        },
+      },
+      clipLocalTime,
+    );
+
+    if (!frame.visible || frame.segments.length === 0) return;
+
+    const spaceWidth = ctx.measureText(" ").width;
+    const widths = frame.segments.map((segment) => ctx.measureText(segment.text).width);
+
+    // A highlighted word grows about its own centre, so it reaches half its growth
+    // into each neighbouring gap. Gaps are widened by that worst-case amount for the
+    // two words they sit between - computed from the maximum scale, never the current
+    // one, so the layout is identical on every frame and nothing shuffles sideways as
+    // the highlight travels.
+    const growth = (width: number) => (width * (MAX_WORD_SEGMENT_SCALE - 1)) / 2;
+    const gaps = widths
+      .slice(0, -1)
+      .map((width, i) => spaceWidth + growth(width) + growth(widths[i + 1]));
+    const totalWidth =
+      widths.reduce((sum, width) => sum + width, 0) +
+      gaps.reduce((sum, gap) => sum + gap, 0);
+
+    // Word-by-word shows one word at a time, so centring the row keeps it from
+    // jumping around as the words change width.
+    let x =
+      style.textAlign === "left"
+        ? 0
+        : style.textAlign === "right"
+          ? -totalWidth
+          : -totalWidth / 2;
+
+    if (style.backgroundColor) {
+      ctx.fillStyle = style.backgroundColor;
+      ctx.fillRect(x - 10, -lineHeight / 2, totalWidth + 20, lineHeight);
+    }
+
+    for (let i = 0; i < frame.segments.length; i++) {
+      const segment = frame.segments[i];
+      const wordWidth = widths[i];
+
+      ctx.save();
+      ctx.globalAlpha = opacity * segment.opacity;
+      // Before any drawing: applyTextStyle leaves textAlign on the style's value
+      // (usually "center"), and these x positions are left edges. Setting it after
+      // the stroke left every outline centred on its own left edge - a ghost copy
+      // of the whole caption, offset by half a word.
+      ctx.textAlign = "left";
+
+      // Scale about the word's own centre so a highlighted word grows in place
+      // instead of pushing the rest of the line sideways.
+      const centreX = x + wordWidth / 2;
+      ctx.translate(centreX, segment.offsetY);
+      ctx.scale(segment.scale, segment.scale);
+      ctx.translate(-centreX, -segment.offsetY);
+
+      if (style.strokeColor && style.strokeWidth) {
+        ctx.strokeStyle = style.strokeColor;
+        ctx.lineWidth = style.strokeWidth;
+        ctx.strokeText(segment.text, x, segment.offsetY);
+      }
+
+      ctx.fillStyle = segment.color ?? style.color;
+      ctx.fillText(segment.text, x, segment.offsetY);
+      ctx.restore();
+
+      x += wordWidth + (gaps[i] ?? 0);
+    }
   }
 
   measureText(text: string, style: TextStyle, maxWidth?: number): TextMetrics {

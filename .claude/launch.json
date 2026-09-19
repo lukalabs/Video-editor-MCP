@@ -1,0 +1,17 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "web",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": ["--filter", "@openreel/web", "dev"],
+      "port": 5173
+    },
+    {
+      "name": "render-service",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["apps/render-service/src/server.js"],
+      "port": 3001
+    }
+  ]
+}

@@ -97,6 +97,44 @@ export async function listServerProjectFolders(): Promise<string[]> {
   return body.folders;
 }
 
+/**
+ * Re-files a project, sending only the new folder.
+ *
+ * Uses the narrow `/projects/:id/folder` route rather than a full PUT: the project list
+ * carries summaries, not project JSON, so re-filing a project that is not open would
+ * otherwise mean fetching the whole blob to change one column.
+ */
+export async function setServerProjectFolder(
+  projectId: string,
+  folder: string,
+): Promise<{ id: string; folder: string; updatedAt: number }> {
+  const response = await fetch(
+    `${BASE}/projects/${encodeURIComponent(projectId)}/folder`,
+    {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ folder }),
+    },
+  );
+  return asJson(response, "Moving project to a folder");
+}
+
+/**
+ * Deletes a project from the server. Irreversible: there is no trash.
+ *
+ * The route also sweeps media that no surviving project references any more (and the
+ * component metadata hanging off it), so the ids it removed come back here — the panel
+ * reports the count so a delete that quietly took media with it is visible.
+ */
+export async function deleteServerProject(
+  id: string,
+): Promise<{ deleted: string; orphanedMediaRemoved: string[] }> {
+  const response = await fetch(`${BASE}/projects/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+  });
+  return asJson(response, "Deleting project");
+}
+
 export async function loadServerProject(
   id: string,
 ): Promise<{ id: string; name: string; project: Project; updatedAt: number }> {
@@ -113,9 +151,18 @@ export async function loadServerProject(
  * own autosave serialiser, which drops `blob`, `fileHandle`, `waveformData` and
  * session-local `blob:` thumbnail URLs.
  */
+/**
+ * Writes the project to the server.
+ *
+ * `folder` is optional and only sent when given, because the route treats an absent folder
+ * as "leave whatever is stored alone" — so an ordinary save from the editor cannot reset a
+ * folder someone set, while a save made with the picker filled in can set one. Pass an empty
+ * string to clear it back to the default.
+ */
 export async function saveServerProject(
   project: Project,
   expectedUpdatedAt?: number | null,
+  folder?: string,
 ): Promise<{ updatedAt: number }> {
   const stripped = JSON.parse(serializeProjectForAutoSave(project)) as Project;
   const response = await fetch(`${BASE}/projects/${encodeURIComponent(project.id)}`, {
@@ -126,6 +173,7 @@ export async function saveServerProject(
       project: stripped,
       // Omitted (or null) means "overwrite regardless", which is the old behaviour.
       ...(expectedUpdatedAt != null ? { expectedUpdatedAt } : {}),
+      ...(folder !== undefined ? { folder } : {}),
     }),
   });
 
@@ -138,6 +186,83 @@ export async function saveServerProject(
   }
 
   return asJson(response, "Saving project");
+}
+
+/* -------------------------------------------------------------- versions */
+
+/**
+ * A point-in-time snapshot of a project.
+ *
+ * Distinct from the automatic server sync, which keeps the CURRENT state fresh and has
+ * no memory. Versions are the memory: coarse checkpoints a person can browse and go back
+ * to. The list carries metadata only - the blobs stay on the server until one is opened.
+ */
+export interface ProjectVersionSummary {
+  readonly id: string;
+  readonly projectId: string;
+  /** "manual" is a deliberate save, "auto" a checkpoint, "pre-restore" an undo point. */
+  readonly origin: "manual" | "auto" | "pre-restore";
+  readonly createdAt: number;
+  readonly sizeBytes: number;
+  readonly clipCount: number | null;
+  readonly duration: number | null;
+  readonly label: string | null;
+}
+
+export async function listProjectVersions(
+  projectId: string,
+): Promise<ProjectVersionSummary[]> {
+  const response = await fetch(
+    `${BASE}/projects/${encodeURIComponent(projectId)}/versions`,
+  );
+  const body = await asJson<{ versions: ProjectVersionSummary[] }>(
+    response,
+    "Listing versions",
+  );
+  return body.versions;
+}
+
+export async function getProjectVersion(
+  projectId: string,
+  versionId: string,
+): Promise<ProjectVersionSummary & { project: Project }> {
+  const response = await fetch(
+    `${BASE}/projects/${encodeURIComponent(projectId)}/versions/${encodeURIComponent(versionId)}`,
+  );
+  return asJson(response, "Loading version");
+}
+
+/** Takes a checkpoint of the project as the server currently holds it. */
+export async function createProjectVersion(
+  projectId: string,
+  options: { origin?: "manual" | "auto"; label?: string } = {},
+): Promise<ProjectVersionSummary> {
+  const response = await fetch(
+    `${BASE}/projects/${encodeURIComponent(projectId)}/versions`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ origin: options.origin ?? "manual", label: options.label }),
+    },
+  );
+  return asJson(response, "Saving a version");
+}
+
+/**
+ * Puts a version back as the project's current state.
+ *
+ * The server snapshots what is being replaced first and returns that as `undoPoint`, so
+ * restoring the wrong version is itself undoable.
+ */
+export async function restoreProjectVersion(
+  projectId: string,
+  versionId: string,
+): Promise<{ updatedAt: number; restoredFrom: string; undoPoint: ProjectVersionSummary }> {
+  const response = await fetch(
+    `${BASE}/projects/${encodeURIComponent(projectId)}/versions/${encodeURIComponent(versionId)}/restore`,
+    { method: "POST" },
+  );
+  return asJson(response, "Restoring the version");
 }
 
 /* ----------------------------------------------------------------- media */

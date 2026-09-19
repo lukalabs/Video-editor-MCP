@@ -1,11 +1,21 @@
 import type { Subtitle, SubtitleStyle, Timeline } from "../types/timeline";
 
+/**
+ * Colour of the word being spoken, per preset.
+ *
+ * Set explicitly rather than left to the caption renderer's fallback, which is
+ * yellow: that is invisible on the "bold" preset, whose text is already yellow.
+ */
+const HIGHLIGHT_ON_LIGHT_TEXT = "#ffd400";
+const HIGHLIGHT_ON_YELLOW_TEXT = "#ffffff";
+
 export const DEFAULT_SUBTITLE_STYLE: SubtitleStyle = {
   fontFamily: "Arial",
   fontSize: 24,
   color: "#ffffff",
   backgroundColor: "rgba(0, 0, 0, 0.75)",
   position: "bottom",
+  highlightColor: HIGHLIGHT_ON_LIGHT_TEXT,
 };
 
 export const SUBTITLE_STYLE_PRESETS: Record<string, SubtitleStyle> = {
@@ -16,6 +26,7 @@ export const SUBTITLE_STYLE_PRESETS: Record<string, SubtitleStyle> = {
     color: "#ffffff",
     backgroundColor: "rgba(0, 0, 0, 0.75)",
     position: "bottom",
+    highlightColor: HIGHLIGHT_ON_LIGHT_TEXT,
   },
   modern: {
     fontFamily: "Helvetica Neue",
@@ -23,6 +34,7 @@ export const SUBTITLE_STYLE_PRESETS: Record<string, SubtitleStyle> = {
     color: "#ffffff",
     backgroundColor: "rgba(0, 0, 0, 0.5)",
     position: "bottom",
+    highlightColor: HIGHLIGHT_ON_LIGHT_TEXT,
   },
   cinematic: {
     fontFamily: "Georgia",
@@ -30,6 +42,7 @@ export const SUBTITLE_STYLE_PRESETS: Record<string, SubtitleStyle> = {
     color: "#f0f0f0",
     backgroundColor: "transparent",
     position: "bottom",
+    highlightColor: HIGHLIGHT_ON_LIGHT_TEXT,
   },
   bold: {
     fontFamily: "Impact",
@@ -37,6 +50,7 @@ export const SUBTITLE_STYLE_PRESETS: Record<string, SubtitleStyle> = {
     color: "#ffff00",
     backgroundColor: "rgba(0, 0, 0, 0.8)",
     position: "bottom",
+    highlightColor: HIGHLIGHT_ON_YELLOW_TEXT,
   },
   minimal: {
     fontFamily: "Roboto",
@@ -44,6 +58,7 @@ export const SUBTITLE_STYLE_PRESETS: Record<string, SubtitleStyle> = {
     color: "#ffffff",
     backgroundColor: "transparent",
     position: "bottom",
+    highlightColor: HIGHLIGHT_ON_LIGHT_TEXT,
   },
   topCenter: {
     fontFamily: "Arial",
@@ -51,6 +66,7 @@ export const SUBTITLE_STYLE_PRESETS: Record<string, SubtitleStyle> = {
     color: "#ffffff",
     backgroundColor: "rgba(0, 0, 0, 0.75)",
     position: "top",
+    highlightColor: HIGHLIGHT_ON_LIGHT_TEXT,
   },
   centered: {
     fontFamily: "Arial",
@@ -58,6 +74,7 @@ export const SUBTITLE_STYLE_PRESETS: Record<string, SubtitleStyle> = {
     color: "#ffffff",
     backgroundColor: "rgba(0, 0, 0, 0.75)",
     position: "center",
+    highlightColor: HIGHLIGHT_ON_LIGHT_TEXT,
   },
 };
 

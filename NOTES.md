@@ -12,6 +12,14 @@ Standing rules that apply to future work, kept here so they survive between sess
   the two Stage 13/14 components in Stage 15. `stat-counter` keeps its original id: it is the
   only pre-`-Rep` component still in the library after Stage 16, and renaming it would break
   the projects and component_metadata rows that reference it.
+- **A component's `meta.json` `description` is one short sentence, about five words.** It is
+  a label, not documentation — "Replika conversation with typing dots", not a paragraph on
+  timing and fonts. It is the line the Component Library panel puts under the name and the
+  blurb `list_components` returns, and long ones wrapped to four or five lines in the panel.
+  Anything a caller actually needs — delimiters, prefixes, accepted values, aspect ratio —
+  belongs on the parameter it concerns (`description` / `lineHint`) or in the dimension
+  fields, which are read as data rather than skimmed as prose. All five descriptions were cut
+  to this length in one pass; per-param docs were deliberately left long.
 - **A component's directory name must equal its `meta.json` id.** `listComponents` throws on
   a mismatch, so a rename means moving the directory too. By convention the project and scene
   filenames match as well (`src/projects/<id>.ts`, `src/scenes/<id>.tsx`), and `meta.json`'s
@@ -3239,7 +3247,519 @@ and scaled to 0.94. The instrument was wrong, not the render.
 and the JSX runtime produce the same errors for the three pre-existing scenes. The new files add
 no new error categories.
 
-## Stage 24 — the button component, and why its slide looked like 16fps
+### Stage 23a — closing the unmeasured entrance claims
+
+Stage 23's verification covered geometry, the curve, colour and timing, and asserted the
+entrance's transform-origin, scale, translateY and opacity as implemented. Three of those were
+read off the source rather than measured. A hypothesis that the corner anchoring was wrong —
+that the port interpolated the scale as a number without repositioning the node, so the bubble
+grew from its centre instead of its corner — forced them to be measured properly. Result: the
+hypothesis was **falsified**, and a different defect in the same family turned up.
+
+**Anchoring is correct.** `entranceTransform` already computes the compensating translation
+(`corner * (1 - scale)`), which is the identity that turns Motion Canvas's origin-anchored
+scale into CSS's corner-anchored one. Measured per-edge at 60fps across the entrance, because
+`transform-origin: 0% 100%` pins the left and bottom edges while translateY still slides the
+bottom on a known schedule:
+
+| | received | sent |
+|---|---|---|
+| anchored edge | left, drift **0px** | right, drift **0px** |
+| free edge | right, travels 30px | left, travels 29px |
+| bottom vs predicted `10*(1-eased)` | worst error 0.8px | worst error 0.8px |
+
+The free edge travelling 30 rather than the naive 41px is the first *visible* frame: frame 0
+has opacity 0, so measurement starts at eased 0.286 (scale 0.9572), giving 0.0428 x 192 x 3.6
+= 29.6px.
+
+**Opacity is correct, and the test could tell the difference.** The source uses the same eased
+value for the fade as for the transform, not a separate linear ramp. Measured peak alpha
+against both hypotheses: worst error **0.0017** vs the eased curve (which is 8-bit
+quantisation) and **0.543** vs a linear fade — 310x apart, so the measurement is decisive
+rather than merely consistent.
+
+**The real defect: canvas shadows do not scale with the node.** `shadowBlur` and `shadowOffset`
+are applied in the canvas's coordinate space and are NOT transformed by the CTM, unlike CSS
+`filter: drop-shadow()`, which scales with the element. These bubbles are built at scale 1 and
+the whole node is zoomed 3.6x to fill the frame, so the shadow stayed at design size:
+
+    before: reach 21px below the bubble   (device-space, 3.6x too tight)
+    after:  reach 77px                    (CSS-equivalent ~86px; the rest is the Gaussian tail)
+
+A shadow 3.6x too tight reads as flatter and harder-edged than the original — the kind of
+mismatch that looks slightly wrong without anything looking broken. `applyShadowScale` fixes it,
+called from each scene once the zoom is known (it depends on the bubbles' measured heights, so
+it cannot be known at build time).
+
+Residual, accepted: during the 240ms entrance the node also scales 0.94 -> 1.0 and CSS would
+scale the shadow with that too. That is a 6% error on the shadow for 240ms; correcting it means
+writing the shadow every frame, which is not worth it.
+
+Re-verified after the fix: anchoring unchanged, fills still exactly `#ffffff`/`#242433` and
+`#00004d`/`#ffffff`, thread gaps still 6.13/11.82/6.13 against 6/12/6, typing windows still
+frames 20-62 and 95-137.
+
+**The lesson, which is the reason this entry exists:** three properties were reported as
+verified in the same table as things that had actually been measured. Two turned out right and
+one turned out wrong, and no reader of that table could have told which was which. A claim read
+off the source is a different kind of claim from one read off pixels, and mixing them in one
+list of checkmarks is what let a 3.6x shadow error sit under a "verified" heading.
+
+## Stage 24 — multi-line text params
+
+Two components carry several items in one text param: orbit-headline-Rep's phrases (joined
+with "|") and chat-thread-Rep's messages (newline, with `rep:` / `me:` prefixes). The
+param vocabulary has no array type and is not gaining one — an agent still sends a single
+delimited string — but a person editing by hand should not have to remember the delimiter.
+
+### Schema
+
+Three optional fields on a text param, passed through untouched because the API returns
+meta.json verbatim (`components.js` validates prop *values*, never the param shape):
+
+    "multiline": true,
+    "lineSeparator": "|",
+    "lineHint": "One phrase per line. ..."
+
+Applied to exactly two params. `stat-counter`'s `label` and `chat-bubble-single-Rep`'s `text`
+are genuinely single-line and were left alone.
+
+`chat-thread-Rep`'s separator is `"\n"` rather than `"|"`, even though its parser accepts
+both: newline is what a person types, and it round-trips through the textarea unchanged.
+
+### A textarea, not a list of line inputs
+
+The decision that mattered was where the canonical value lives. The panel already keeps
+`values[param.key]` as one joined string and restores it straight from a clip's stored props
+on re-open. So the textarea renders `value.split(separator).join("\n")` and joins back on
+change, and **nothing else had to change** — the submit paths, the re-render flow and the
+"split it back for editing" requirement all fall out of that one substitution.
+
+A dynamic add/remove list would have needed a `lines[]` state per param kept in sync with the
+string, which is a second source of truth and a new way to desync. It is also worse for the
+actual use: people paste multi-line chat text.
+
+### MCP-facing consistency
+
+Each param's `description` — the prose MCP surfaces — now states the delimiter rule in the
+same terms as the `lineHint`, so the friendly UI wording and the API documentation cannot
+drift apart. The `lineSeparator` field gives an agent the same answer as data.
+
+While verifying, the `list_components` **tool description** turned out to be stale in the
+other direction: it named "a stat counter, a 9:16 turbulent background, an orbit headline"
+and had never learnt about the two chat components. Stage 19's guard test catches quoted ids
+that do NOT exist; it cannot catch components that exist and are not mentioned. Fixed
+structurally rather than by adding the two names — the description no longer enumerates
+components at all, so it cannot go stale again.
+
+### Verification
+
+All five, against the running stack in a real browser.
+
+| | result |
+|---|---|
+| 1. orbit-headline-Rep | textarea; default shows as two lines; typing three lines sent `"First phrase\|Second phrase\|Third phrase"` |
+| 2. chat-thread-Rep | textarea; hint names the prefixes; a sender-prefixed thread sent newline-joined, byte for byte |
+| 3. re-open an existing clip | generated, added to a track, selected: the stored string came back as three editable lines |
+| 4. stat-counter's `label` | still `<input type=text>`, no hint |
+| 5. MCP round-trip | `list_components` carries both descriptions in prose, plus the three new schema fields |
+
+Verifications 1 and 2 assert the **outgoing request body**, not the field's state: that payload
+is the contract between the field and the renderer, so reading it settles whether the join is
+right. Suites: mcp-server 15/15, render-service 26/26, web typecheck clean.
+
+Two things the harness got wrong before the app did, both worth recording because the next UI
+test will hit them:
+
+- **Request interception slows every load through CDP.** A fixed 5.8s wait that was ample
+  without it fired before the panel had rendered, and the run reported "the panel does not
+  open" when it opened fine. Wait for the control, never for a duration.
+- **The Component Library is a tab inside the assets panel**, not a rail icon, and generated
+  media carries its component in a module registry keyed by media id — the clip is only
+  stamped with `componentId`/`props` once it reaches a track. Two probes were written against
+  guesses at both before checking the DOM and the source.
+
+### Stage 24a — the prefix vocabulary is rep:/me:
+
+`received:` / `sent:` (and `r:` / `s:`) became `rep:` / `me:` (and `r:` / `m:`). "rep" is the
+companion, short for the product name; "me" is the user's own side — which is what the source
+called it internally (`from === "me"`), so the new vocabulary is closer to the original than
+the one it replaces. A clean replacement, not an alias: the component had no real usage beyond
+verification renders, and two parallel vocabularies would be worse than either.
+
+**The rename stops at the parsing boundary.** The internal `Sender` values stay
+`"received"` / `"sent"`, because the palette and the alignment are keyed on them, so
+`balloon-bubble.tsx` — the file holding the colour and side mapping — has a **zero diff**.
+That is the strongest available form of "the mapping did not change": not a re-verification,
+an unchanged file. The pixel check was run anyway, since the request touched adjacent code.
+
+Verified: rep -> `#ffffff` / `#242433` / left and me -> `#00004d` / `#ffffff` / right, sampled
+exactly from a render using both long and short forms, and again from an unprefixed thread to
+confirm alternation still opens on the rep side.
+
+**Where the old forms went:** they are now ordinary text, asserted rather than assumed —
+`parseThread("received: hi")` yields one message whose *text* is "received: hi". Also asserted:
+`maybe: tomorrow` and `report: done` are not eaten by the `m:` and `rep:` prefixes, since the
+regex requires the colon immediately after the marker.
+
+One thing worth knowing for the next colour check: **a webm cannot be used to assert an exact
+hex.** Sampling the UI-generated file showed `#252231` where the source frame had `#242433`,
+which looked like a rename bug. It is the VP9 encode: re-sampling the encode of the very same
+verified-exact PNG frames reproduces the shift. Exact-hex assertions belong on the renderer's
+PNG output; the webm is lossy by design.
+
+Left inconsistent on purpose, pending a decision: `chat-bubble-single-Rep`'s `sender` param
+still takes `"received"` / `"sent"` as its values. It is a different param on a different
+component and was outside this rename's scope, but the two components now describe the same
+two sides with different words.
+
+### Stage 24b — the single bubble's sender param follows
+
+`chat-bubble-single-Rep`'s `sender` values became `rep` / `me` (with `r` / `m`), so both
+components describe the same two sides with the same words. Colour and side mapping untouched
+again — `balloon-bubble.tsx` still has a zero diff across both renames.
+
+**`readSender` is now strict, and that was the point.** It used to read anything starting with
+"s" as the sent side, so `"sent"` would have gone on working as an undocumented alias — the
+exact outcome a clean rename is meant to avoid — and any unrecognised value would have
+silently rendered as the companion: wrong colour, wrong side, nothing to show it. It now
+accepts only `rep` / `r` / `me` / `m` and throws otherwise, naming the valid values and
+saying the old ones were renamed.
+
+Verified: `rep` renders `#ffffff` / `#242433` on the left and `me` renders `#00004d` /
+`#ffffff` on the right, sampled exactly from PNG frames. `received`, `sent` and `nonsense`
+each fail the render with that error and write no output file; `r` and `m` still render, as
+the control that the rejection is about the value and not about strictness in general.
+
+## Stage 25 — manual folder assignment in the editor
+
+Stage 22 built the folder backend and a read-only display. This adds the two write paths a
+person needs: choosing a folder when saving, and re-filing an existing project.
+
+### A folder-only route, because the list holds summaries
+
+`PUT /projects/:id` requires the whole project object, so a folder-only body 400s. That could
+have been worked around by sending a cached project — except the panel's list carries
+*summaries*, not project JSON, so re-filing a project that is not currently open would mean
+fetching the entire blob to change one column. Hence `PUT /projects/:id/folder`, backed by
+`setProjectFolder`, which touches only that column and `updated_at`.
+
+It deliberately takes no `expectedUpdatedAt`: moving a project between folders does not
+conflict with someone editing its contents, so the optimistic-concurrency guard would only
+produce false conflicts. A test asserts the project JSON is byte-for-byte unchanged after a
+re-file — a move that quietly rewrote a composition would be far worse than one that failed.
+
+Six tests, mutation-tested four ways: not reporting an unknown project fails 1, skipping
+normalisation fails 2, not bumping `updated_at` fails 6, writing the wrong column fails 4.
+
+### One control, not two
+
+`FolderPicker` is a text input backed by a `<datalist>` — a native combobox, so the dropdown
+offers what exists and anything typed is a new folder. A `<select>` plus a separate "new
+folder" field would make reuse and invention look equally heavy and need a mode switch. The
+default folder is filtered out of the options: it is a presentation of "no folder", not
+somewhere to file into, and clearing the field already does that.
+
+### The endpoint finally has a caller, and it is provably the source
+
+`GET /projects/folders` had **two** wrappers and zero call sites — `listServerProjectFolders`
+in the editor and `service.listProjectFolders` in the MCP server, neither ever invoked.
+(`?folder=` was never dead, though: MCP's `list_projects` passes it. An earlier note in this
+session called both dead; only the folders endpoint was.)
+
+The pickers are now fed by it rather than by folders derived from the loaded projects, which
+matters because the two only agree by coincidence. Proved rather than asserted: the
+verification intercepts that response and injects a folder no project is in, then checks it
+appears in the picker and does NOT appear as a grouped section.
+
+### Verification
+
+All five, in a real browser, plus the server-side filter as a cross-check.
+
+| | result |
+|---|---|
+| 1. save into an existing folder | the PUT carried `folder: "Existing Client"`, and the server reports that folder for the id the app actually saved |
+| 2. save into a typed new folder | folder created, project in it, offered by the picker with no app reload, and `GET /projects/folders` agrees |
+| 3. re-file via the card's Move action | one `PUT .../folder` with body `{"folder":"Existing Client"}` and no project JSON; panel updates; survives a full reload |
+| 4. the picker's data source | an injected endpoint-only folder shows in the picker and not as a section |
+| 5. regression | grouping, per-folder counts, default sorting last, filter narrowing and clearing all still work; the server-side `?folder=` count matches the client-side filter exactly (6 vs 6) |
+
+28 assertions. Suites: render-service 32/32 (6 new), mcp-server 15/15, project-kit 27/27, web
+typecheck clean.
+
+### Three harness defects that looked like product bugs
+
+Worth recording, because each cost a run and the next UI test will meet them:
+
+- **An `aria-label` collision I created.** The save picker was labelled "Folder for the next
+  save", and the folder sections are labelled `Folder <name>` — so a selector for
+  `[aria-label^="Folder "]` found a phantom section called "for the next save", which skewed
+  five assertions. That was a real naming defect, not just a test problem: a screen-reader
+  user hearing "Folder for the next save" among "Folder Client Acme" has the same ambiguity.
+  Renamed to "Save into folder".
+- **The editor's project identity is still settling when the panel renders.** It restores its
+  autosaved project asynchronously, so `project.id` read just before a save is not
+  necessarily the id the save writes to — reading it earlier or later does not fix that. The
+  test now asserts against the id in the PUT the app itself issued, which is by definition
+  the project that was saved.
+- **Project names are not unique in this database.** Earlier stages left several projects
+  called `MCP-claude-test-2-MCP`, so a name-based "is it gone from Uncategorized" check fails
+  because a *different* project of that name is still there. Identity assertions go through
+  ids.
+
+## Stage 26 — exit animations
+
+New design, not a port: the source has no exit at all. So the question was not "what does the
+original do" but "what can we derive from it", and the answer is the entrance, backwards.
+
+### exitTransform is one function read in two directions
+
+`exitTransform(exited) = entranceTransform(easeOut(1 - exited))`. It is a call into the
+entrance's own transform, not a second implementation, so the symmetry is a property of the
+code rather than a claim about it.
+
+**The easing has to sit inside the mirror.** The request's formula was
+`entranceTransform(1 - t / EXIT)`, which drops it — the entrance is
+`entranceTransform(easeOut(p))`, so mirroring the raw progress instead of the eased one gives
+a *linear* exit. Measured, that formulation diverges from a true time reversal by up to
+**6.18px of translate, 0.54 of opacity and 0.033 of scale** — endpoints identical, middle
+visibly wrong. Corrected before building.
+
+### Fitting it into the duration
+
+`EXIT` is aliased to `ENTER` rather than given its own 0.24, because two constants that happen
+to be equal can drift apart. `EXIT_STAGGER` is 0.12, the interval orbit-headline-Rep already
+uses for its words: half the exit duration, so consecutive bubbles overlap by 50% and the
+thread reads as one wave leaving rather than a queue being served.
+
+- **Single bubble:** entrance, hold, exit. The hold absorbs the slack. Below 0.48s there is no
+  hold left and the *entrance* truncates — the exit is never clipped, because a clip ending
+  mid-disappearance looks broken in a way a slightly clipped arrival does not. The param's own
+  minimum is 0.5s, so the validated range never gets there.
+- **Thread:** the exit joins `paceFor`'s fixed cost
+  (`n×ENTER + (n−1)×EXIT_STAGGER + EXIT`), so only the pauses are elastic and the wave is
+  structurally unclippable. The single pace factor is kept rather than special-casing the hold
+  to collapse first: that model is already verified end to end, and a marginally nicer
+  degenerate case is not worth replacing it.
+- **Bubbles leave from where they sit.** `layoutAt` keeps every arrived bubble in its row
+  through the exit; re-laying out the stack as bubbles went would make the survivors jump
+  around mid-wave.
+
+The full mirrored transform is used for the thread, not the plain-fade fallback that was
+allowed: rendered and looked at, the staggered corner-anchored shrink reads cleanly, because
+each bubble collapses toward its own side while its neighbours hold still.
+
+### Verification
+
+| | result |
+|---|---|
+| 1. symmetry | 1001 samples × 2 senders × 3 sizes: worst delta **1.4e-14** (float round-off from the mirror's one subtraction — both directions call the same function). 4/4 mutations caught |
+| 2. exit in pixels | monotonic 1.00 → 0.29 → 0, largest single-frame step 0.29 (a pop would be ~1.0), anchored-edge drift **0px**, and the mirror holds **frame for frame: delta 0.0000** at every sampled instant |
+| 3. stagger order | 3 messages: half-faded at 7.733 / 7.867 / 8.000, strictly oldest-first; bubble 0 gone at 7.767 as the last starts at 7.760 |
+| 4. generalization | 5 messages at 14s: strictly ordered, last bubble finishes exactly at 14.000; schedules land on target for both 8s/3 and 14s/5 |
+| 5. regression | entrance anchoring 0px drift both senders, opacity ramp 0.0017 vs the eased curve (0.543 vs linear), fills exactly `#ffffff`/`#242433` and `#00004d`/`#ffffff`; balloon-geometry.ts, text-measure.ts and chat-font.ts all have a **zero diff** |
+
+Timeline regression rewritten around the change rather than relaxed: it now asserts the
+arrival schedule is still **identical to the source's** (delta 0) and that our duration is the
+source's *plus exactly the exit wave*. 16 new exit-wave assertions on top.
+
+### Two things the measurement got wrong first
+
+- **"Exact by construction" was too strong.** Both directions do share one function, but
+  sampling the mirror needs one subtraction, and `1 - (EXIT - s)/EXIT` is not bit-identical to
+  `s/EXIT`. The residual is 1.4e-14 — physically zero, but not zero, and the test now says so
+  with a stated tolerance instead of claiming exactness it does not have.
+- **A symmetry test cannot see a change made to both sides at once.** Mutating the shared
+  `(1 - eased) * 10` to `* 14` left symmetry perfectly intact — correctly, since that is what
+  shared implementation means. The gap was real though: the entrance's own magnitudes were
+  unpinned by this test. Endpoint assertions now pin the 10px travel alongside the 0.94 scale,
+  and that mutation is caught.
+
+Also worth keeping: the renderer emits **one frame past the duration** (92 frames for a 1.5s
+clip at 60fps), so "the last frame" is not `t = duration`. An index-based mirror is off by one
+because of it; pair frames by time.
+
+## Stage 27 — word-highlighted captions
+
+Captions animate word by word, in the preview and in exports, from real Whisper word
+timestamps where the model can produce them and from an estimate where it cannot.
+
+### What was already there, and why none of it worked
+
+The fork shipped most of a word-highlight feature that could never run:
+
+- `caption-animation-renderer.ts` implements six styles (word-highlight, word-by-word,
+  karaoke, bounce, typewriter, none) against `Subtitle.words`.
+- Nothing ever populated `Subtitle.words`. The Whisper panel asked for
+  `return_timestamps: true`, which is one timestamp per sentence-ish chunk.
+- Nothing ever populated `timeline.subtitles` either: `subtitle/add` exists in core
+  with a validator, an executor and an inverse, and has no callers anywhere. Both the
+  Whisper panel and SRT import route through `addSubtitle`, which creates a TEXT CLIP
+  on a "Captions" track. Export reverses that, deriving SRT back out of text clips.
+- The inspector's animation-style dropdown read `selectedSubtitle` from that empty
+  array, so it could not affect anything, and its "re-generate captions to enable
+  animation" hint pointed at a path that never produced word timings.
+- The animated renderer was wired into the preview canvas only. Export draws text
+  through `video-engine`, which drew captions as plain text.
+
+So the feature was built on `timeline.subtitles`, and the product uses text clips. The
+work here moves it onto the side that is actually used, and leaves the subtitle system
+untouched and dead rather than deleting it.
+
+### Where the animation lives now
+
+`words` and `animationStyle` are fields on `TextClip`; `highlightColor` and
+`upcomingColor` are on `TextStyle`. `titleEngine.renderText` draws the word row, which
+matters: **the preview and the export both render text through `renderText`**, so one
+implementation serves both and the two cannot drift. This is the same class of bug as
+Stage 7 and the `render_preview_frame` alpha bug, and the fix is the same shape - make
+export use the shared path instead of its own simplified one.
+
+Word times are **clip-relative** (0 = clip start), unlike `Subtitle.words`, which is
+absolute. The words belong to the clip, so moving a caption keeps it in sync with
+itself.
+
+Gaps between words are reserved from `MAX_WORD_SEGMENT_SCALE`, not from the current
+frame's scale: a highlighted word grows about its own centre, and sizing the gaps per
+frame made the row twitch as the highlight travelled.
+
+### Every caption gets word timing
+
+`deriveWordTimings` shares a cue's duration across its words in proportion to spoken
+length (punctuation stripped, since it is not spoken). It is an estimate, and it is
+what SRT imports, hand-typed captions and the fast Whisper model get. Real timestamps
+overwrite it rather than merging. New captions default to `word-highlight`.
+
+### Only one of the two Whisper models can do word timestamps
+
+`whisper-large-v3-turbo_timestamped` can. `whisper-tiny` **cannot**, and does not
+degrade - the whole transcription throws:
+
+> Model outputs must contain cross attentions to extract timestamps. This is most
+> likely because the model was not exported with `output_attentions=True`.
+
+Word timings are extracted from decoder cross-attentions, which only the
+"_timestamped" builds are exported with. `supportsWordTimestamps` on the model
+definition decides what the worker asks for; a model without it gets segment
+timestamps and its captions fall back to the proportional estimate.
+
+Measured on 7.2s of synthesised speech, against ffmpeg `silencedetect` on the source:
+
+| boundary | audio | Whisper | delta |
+|---|---|---|---|
+| first sentence ends | 2.721s | 2.70s | 21 ms |
+| second sentence starts | 3.748s | 3.28s | 470 ms early |
+| speech ends | 6.373s | 6.34s | 33 ms |
+
+Ends of phrases land within ~30ms. The **start** of a phrase after a pause runs early,
+because Whisper anchors the first word to the end of the preceding silence rather than
+to the onset of speech. In practice the highlight lights the first word of a sentence
+about half a second before it is spoken. Trimming a word's start to the next
+`silencedetect` edge would fix it and has not been done.
+
+### Known external dependency: the model CDN is not ours
+
+`whisper-worker.ts` hardcodes `https://media.openreel.video/models/` - the upstream
+vendor's infrastructure, not ours. Inference is fully local and no audio leaves the
+machine, but the **first-run download** depends on a third party who has no obligation
+to keep serving it. If it disappears, auto-captions stop working for anyone who has not
+already cached a model.
+
+Re-hosting is a config change plus storage. Measured from the CDN:
+
+| model | encoder | decoder | tokenizer | total |
+|---|---|---|---|---|
+| large-v3-turbo_timestamped | 405.3 MB | 318.7 MB | 2.4 MB | ~726 MB |
+| whisper-tiny | 8.6 MB | 82.7 MB | 2.4 MB | ~94 MB |
+
+About **820 MB** for both, or ~726 MB for just the model that supports word timings.
+The work is: mirror the files, serve them from render-service (or any static host)
+under the same `{model}/resolve/{revision}/` layout, and point `env.remoteHost` at it.
+Worth doing before anyone depends on captions in production; the files are too large
+for the git repo, so they would need a storage directory and a fetch script.
+
+## Stage 28 — automatic server saves, duplicate guard, version history
+
+### Why
+
+A day's editing sat in one browser while the server copy stayed two days old.
+Three projects had local IndexedDB autosaves ahead of their server rows, because
+saving to the server was a button someone had to remember to press.
+
+### Saving is automatic now
+
+`ServerSyncManager` rides the dirty signal the project store already emits: 2s
+after the last edit, throttled to one write per 5s while editing continues,
+backing off to 30s past 2MB. Flushes on hide, on blur, and once more during
+unload with `fetch(keepalive)` — under 64KB, which real projects are.
+
+Kept separate from `AutoSaveManager` on purpose. Local autosave is the
+last-resort net; it must not be slowed or made noisy by a flaky network, and the
+two want different cadences. They share the dirty signal and nothing else.
+
+A 409 stops the loop and surfaces rather than retrying, because auto-retrying
+with the server's newer timestamp is how another session's work disappears. The
+one exception is a phantom — the server's copy being exactly what we last sent,
+meaning our own write landed and we never saw the response — which rebases
+silently.
+
+The concurrency baseline moved from `ServerProjectsPanel`'s component state into
+the store: saving no longer depends on that panel being mounted.
+
+Pristine projects are skipped, so opening the editor creates nothing. The first
+real edit brings a project into being server-side.
+
+### Three layers, three jobs
+
+| layer | cadence | scope | job |
+|---|---|---|---|
+| IndexedDB autosave | 2s | this browser | crash recovery, works offline |
+| server sync | ~5s | current state, all devices | the server has my latest |
+| version history | ~10min + manual | history, all devices | take me back to this morning |
+
+No overlap: local is sub-second and disposable, sync has no memory, versions are
+coarse history with no current-state role.
+
+### Version history
+
+`project_versions` holds whole project JSON per checkpoint — at ~12KB a project,
+diffing saves little and buys a reconstruct step that can fail.
+
+Checkpoints, not saves: one per "Save now", one per 10 minutes of editing
+(`AUTO_VERSION_INTERVAL_MS`), one immediately before a restore. Automatic syncs
+write every few seconds and would otherwise produce thousands of unreadable rows.
+
+Restore snapshots what it replaces as `pre-restore` and writes the old content
+through the ordinary upsert, so a restore is undoable and the restored state is
+just a normal current state — editable, syncable, versionable.
+
+Retention mirrors `sweepExports`: keep the newest 30 **per project**, plus
+anything under 7 days, plus manual versions under 30 days. Per project so a busy
+one cannot evict a quiet one's history. Measured cost at 12KB/version: ~360KB per
+project at the cap, ~18MB across 50 projects — less than one exported MP4.
+
+Deleting a project deletes its versions. The delete dialog says it cannot be
+undone, and restorable history would make that a lie.
+
+**The subtle part: sweeps must treat version blobs as references.** Both
+`findOrphanedMedia` and `sweepRenderedFiles` now scan version JSON as well as the
+current project rows. The media a person removed from the timeline this morning
+is exactly what a naive sweep collects — the moment before they reach for the
+history to get it back. There is a test for precisely that.
+
+### create_project no longer mints duplicates
+
+The project list accumulated `Agent Built` three times and
+`MCP-claude-test-2-MCP` twice: `create_project` generated a fresh uuid every call
+and compared nothing. It now returns the existing project when the name and
+folder both match, with `reusedExisting: true`, and `allowDuplicateName` for when
+a second one is genuinely wanted. Matching on name *and* folder: two "Intro"
+projects under different clients are different work.
+
+Enforced server-side for the same reason the `-MCP` suffix is — a convention an
+agent has to remember is one that gets dropped.
+
+## Stage 29 — the button component, and why its slide looked like 16fps
 
 A generic `button` component: one scene covering the whole button set through parameters
 (label, size, colours, radius, filled vs outlined, shadow, `positionY`, `holdToEnd`,

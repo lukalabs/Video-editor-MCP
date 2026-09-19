@@ -48,38 +48,34 @@ export const SpeedSection: React.FC<SpeedSectionProps> = ({ clip }) => {
     setCustomSpeed(currentSpeed.toString());
   }, [currentSpeed]);
 
-  const hasAudio = () => {
-    return project.timeline.tracks.some((track) =>
-      track.clips.some(
-        (audioClip) =>
-          audioClip.id !== clip.id &&
-          audioClip.mediaId === clip.mediaId &&
+  /**
+   * The audio clips detached from this one, identified by the link group that
+   * `separateAudio` stamps on both sides.
+   *
+   * This used to match on "any other clip with the same mediaId whose media has
+   * audio", which is also the exact description of a duplicate of this clip - so
+   * reversing or re-speeding one copy silently did the same to the other. Sharing a
+   * source file is not a link; being split from the same clip is.
+   */
+  const linkedAudioClips = () => {
+    if (!clip.linkGroupId) return [];
+    return project.timeline.tracks.flatMap((track) =>
+      track.clips.filter(
+        (candidate) =>
+          candidate.id !== clip.id &&
+          candidate.linkGroupId === clip.linkGroupId &&
           getMediaItemCapabilities(
             project.mediaLibrary.items.find(
-              (item) => item.id === audioClip.mediaId,
+              (item) => item.id === candidate.mediaId,
             ),
           ).audio,
       ),
     );
   };
 
-  const linkedAudioClip = () => {
-    if (!affectAudio) return undefined;
-    for (const track of project.timeline.tracks) {
-      const audioClip = track.clips.find(
-        (candidate) =>
-          candidate.id !== clip.id &&
-          candidate.mediaId === clip.mediaId &&
-          getMediaItemCapabilities(
-            project.mediaLibrary.items.find(
-              (item) => item.id === candidate.mediaId,
-            ),
-          ).audio,
-      );
-      if (audioClip) return audioClip;
-    }
-    return undefined;
-  };
+  const hasAudio = () => linkedAudioClips().length > 0;
+
+  const affectedAudioClips = () => (affectAudio ? linkedAudioClips() : []);
 
   const updateClipDuration = (speed: number) => {
     const store = useProjectStore.getState();
@@ -89,8 +85,7 @@ export const SpeedSection: React.FC<SpeedSectionProps> = ({ clip }) => {
       timestamp: Date.now(),
       params: { clipId: clip.id, speed },
     });
-    const audioClip = linkedAudioClip();
-    if (audioClip) {
+    for (const audioClip of affectedAudioClips()) {
       void store.executeAction({
         type: "clip/setSpeed",
         id: crypto.randomUUID(),
@@ -109,8 +104,7 @@ export const SpeedSection: React.FC<SpeedSectionProps> = ({ clip }) => {
       timestamp: Date.now(),
       params: { clipId: clip.id, reversed },
     });
-    const audioClip = linkedAudioClip();
-    if (audioClip) {
+    for (const audioClip of affectedAudioClips()) {
       void store.executeAction({
         type: "clip/setReverse",
         id: crypto.randomUUID(),

@@ -176,6 +176,20 @@ export type ClipAction =
       type: "clip/trim";
       params: { clipId: string; inPoint?: number; outPoint?: number };
     }
+  | {
+      /**
+       * Dragging a clip edge on the timeline: moves the clip's start and/or changes
+       * its duration in one undoable step. `clip/trim` is the in/out-point operation
+       * and leaves startTime alone.
+       */
+      type: "clip/resizeEdge";
+      params: {
+        clipId: string;
+        startTime?: number;
+        duration?: number;
+        keyframes?: Keyframe[];
+      };
+    }
   | { type: "clip/split"; params: { clipId: string; time: number } }
   | { type: "clip/rippleDelete"; params: { clipId: string } }
   | {

@@ -1,8 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   SUBTITLE_STYLE_PRESETS,
-  splitCaptionIntoSingleLineCues,
   type TranscriptionSegment,
+  type SubtitleWord,
 } from "@openreel/core";
 import {
   ToolcraftButton as Button,
@@ -47,6 +47,54 @@ const WHISPER_LANGUAGES = [
   { code: "vi", name: "Vietnamese" },
 ] as const;
 
+/**
+ * A caption cue plus the real word timings behind it.
+ *
+ * Whisper is now asked for word-level timestamps, so a transcription comes back as a
+ * flat run of words rather than sentence chunks. Cues are built here instead of being
+ * split by proportional time later: with real timings the cue boundaries land on
+ * actual word boundaries, and each cue can carry the words its animation needs.
+ */
+interface CaptionCue extends TranscriptionSegment {
+  readonly words: SubtitleWord[];
+}
+
+/** Words whose text ends a sentence; a cue prefers to break after one. */
+const SENTENCE_END = /[.!?…]["')\]]?$/u;
+
+/**
+ * Groups timed words into cues of at most `maxWords`, breaking early at sentence
+ * ends so a cue does not straddle two sentences when it does not have to.
+ */
+function groupWordsIntoCues(
+  words: readonly SubtitleWord[],
+  maxWords: number,
+): CaptionCue[] {
+  const limit = Math.max(1, Math.floor(maxWords));
+  const cues: CaptionCue[] = [];
+  let current: SubtitleWord[] = [];
+
+  const flush = () => {
+    if (current.length === 0) return;
+    cues.push({
+      text: current.map((word) => word.text).join(" "),
+      startTime: current[0].startTime,
+      endTime: current[current.length - 1].endTime,
+      confidence: 1,
+      words: current,
+    });
+    current = [];
+  };
+
+  for (const word of words) {
+    current.push(word);
+    if (current.length >= limit || SENTENCE_END.test(word.text)) flush();
+  }
+  flush();
+
+  return cues;
+}
+
 interface AutoCaptionPanelProps {
   clipId?: string;
   maxWordsPerLine?: number;
@@ -82,7 +130,7 @@ export const AutoCaptionPanel: React.FC<AutoCaptionPanelProps> = ({
   const [modelBackends, setModelBackends] = useState<
     Partial<Record<WhisperModelKey, "webgpu" | "wasm">>
   >({});
-  const [segments, setSegments] = useState<TranscriptionSegment[]>([]);
+  const [segments, setSegments] = useState<CaptionCue[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   const selectedItems = useUIStore((state) => state.selectedItems);
@@ -110,7 +158,7 @@ export const AutoCaptionPanel: React.FC<AutoCaptionPanelProps> = ({
     (
       type: "load" | "transcribe",
       audio?: Float32Array,
-    ): Promise<{ text?: string; chunks?: WorkerChunk[] }> => {
+    ): Promise<{ text?: string; chunks?: WorkerChunk[]; wordTimestamps?: boolean }> => {
       const worker = workerRef.current;
       if (!worker) return Promise.reject(new Error("Caption worker is not ready."));
       const requestId = crypto.randomUUID();
@@ -157,6 +205,7 @@ export const AutoCaptionPanel: React.FC<AutoCaptionPanelProps> = ({
             resolve({
               text: String(event.data.text ?? ""),
               chunks: (event.data.chunks ?? []) as WorkerChunk[],
+              wordTimestamps: Boolean(event.data.wordTimestamps),
             });
           } else if (messageType === "error") {
             worker.removeEventListener("message", handleMessage);
@@ -258,34 +307,49 @@ export const AutoCaptionPanel: React.FC<AutoCaptionPanelProps> = ({
       const sourceDuration = Math.max(0.1, sourceEnd - sourceStart);
       const playbackSpeed = Math.max(clip.speed ?? 1, 0.01);
       const clipEndTime = clip.startTime + clip.duration;
-      const nextSegments: TranscriptionSegment[] = (result.chunks ?? [])
+      // Source seconds to timeline seconds: the clip may start part-way into its
+      // media and may be sped up, and a word's timestamp is in source time.
+      const toTimelineTime = (sourceTime: number) =>
+        Math.min(
+          clipEndTime,
+          clip.startTime +
+            Math.min(Math.max(0, sourceTime), sourceDuration) / playbackSpeed,
+        );
+
+      const timedChunks = (result.chunks ?? [])
         .map((chunk) => {
           const start = Math.max(0, chunk.timestamp?.[0] ?? 0);
-          const end = Math.min(
-            sourceDuration,
-            chunk.timestamp?.[1] ?? Math.min(sourceDuration, start + 3),
-          );
+          // A trailing chunk sometimes comes back with an open end; give it a beat
+          // rather than dropping it.
+          const end = chunk.timestamp?.[1] ?? Math.min(sourceDuration, start + 0.3);
           return {
             text: chunk.text.trim(),
-            startTime: Math.min(clipEndTime, clip.startTime + start / playbackSpeed),
-            endTime: Math.min(
-              clipEndTime,
-              clip.startTime + Math.max(start + 0.1, end) / playbackSpeed,
-            ),
-            confidence: 1,
+            startTime: toTimelineTime(start),
+            endTime: toTimelineTime(Math.max(start + 0.05, end)),
           };
         })
-        .filter(
-          (segment) =>
-            segment.text.length > 0 && segment.endTime > segment.startTime,
-        );
+        .filter((chunk) => chunk.text.length > 0 && chunk.endTime > chunk.startTime);
+
+      // Only some models can report word timings (see whisper-models). When they
+      // cannot, the chunks are sentence-ish segments and become cues as they are -
+      // each one still animates, from timings derived off word length when it is
+      // added to the timeline.
+      let nextSegments: CaptionCue[] = result.wordTimestamps
+        ? groupWordsIntoCues(timedChunks, maxWordsPerLine)
+        : timedChunks.map((chunk) => ({ ...chunk, confidence: 1, words: [] }));
+
+      // Nothing usable came back with timings but there is a transcript: keep the
+      // text as one cue rather than losing the transcription entirely.
       if (nextSegments.length === 0 && result.text?.trim()) {
-        nextSegments.push({
-          text: result.text.trim(),
-          startTime: clip.startTime,
-          endTime: clipEndTime,
-          confidence: 1,
-        });
+        nextSegments = [
+          {
+            text: result.text.trim(),
+            startTime: clip.startTime,
+            endTime: clipEndTime,
+            confidence: 1,
+            words: [],
+          },
+        ];
       }
       if (nextSegments.length === 0) {
         throw new Error("No speech was detected in the selected clip.");
@@ -305,30 +369,26 @@ export const AutoCaptionPanel: React.FC<AutoCaptionPanelProps> = ({
     const style = SUBTITLE_STYLE_PRESETS[selectedStyle] ?? SUBTITLE_STYLE_PRESETS.default;
     let addedCount = 0;
     for (const segment of segments) {
-      const cues = splitCaptionIntoSingleLineCues(
-        segment.text,
-        segment.startTime,
-        segment.endTime,
-        maxWordsPerLine,
+      // No re-splitting here any more: the cues were built from real word
+      // boundaries during transcription, and splitting them again by proportional
+      // time would throw away the timings that make the animation accurate.
+      await addSubtitle(
+        {
+          id: `whisper-${crypto.randomUUID()}`,
+          text: segment.text,
+          startTime: segment.startTime,
+          endTime: segment.endTime,
+          style,
+          ...(segment.words.length > 0 ? { words: segment.words } : {}),
+        },
+        {
+          captionSource: "whisper",
+          captionSourceClipId: clip.id,
+          captionMaxWordsPerLine: maxWordsPerLine,
+          captionWhisperModel: selectedModel,
+        },
       );
-      for (const cue of cues) {
-        await addSubtitle(
-          {
-            id: `whisper-${crypto.randomUUID()}`,
-            text: cue.text,
-            startTime: cue.startTime,
-            endTime: cue.endTime,
-            style,
-          },
-          {
-            captionSource: "whisper",
-            captionSourceClipId: clip.id,
-            captionMaxWordsPerLine: maxWordsPerLine,
-            captionWhisperModel: selectedModel,
-          },
-        );
-        addedCount += 1;
-      }
+      addedCount += 1;
     }
     setSegments([]);
     setProgressMessage(`${addedCount} single-line caption clips added`);

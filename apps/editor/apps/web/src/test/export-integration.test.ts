@@ -3,6 +3,9 @@ import { useProjectStore } from "../stores/project-store";
 import type { Project, Clip, Track } from "@openreel/core";
 
 vi.mock("../services/auto-save", () => ({
+  // Server sync hashes and serialises through this helper, so a partial mock of the
+  // auto-save module has to provide it too.
+  serializeProjectForAutoSave: (project: unknown) => JSON.stringify(project),
   autoSaveManager: {
     startAutoSave: vi.fn(),
     stopAutoSave: vi.fn(),

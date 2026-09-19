@@ -33,6 +33,7 @@ import {
   DOT_SIZE,
   type Sender,
   dotState,
+  easeOut,
 } from "./chat-timeline";
 import { measureText, type MeasureOptions } from "./text-measure";
 
@@ -52,6 +53,33 @@ export interface BuiltBubble {
   node: Node;
   width: number;
   height: number;
+  /** The silhouette itself, so the shadow can be rescaled once the node zoom is known. */
+  shadow: Path;
+  /** The fontSize scale this bubble was built at. */
+  scale: number;
+}
+
+/**
+ * Rescales the drop shadow for the zoom the bubble is rendered at.
+ *
+ * Canvas `shadowBlur` and `shadowOffset` are applied in the canvas's own coordinate space and
+ * are NOT transformed by the current transform matrix — unlike CSS `filter: drop-shadow()`,
+ * which scales with the element. Since these bubbles are built at scale 1 and the whole node
+ * is then zoomed to fill the frame, the shadow would otherwise stay at its design size: at
+ * zoom 3.6 it measured 21px of reach where CSS gives ~86px, reading flatter and harder-edged
+ * than the original without anything looking obviously wrong.
+ *
+ * Called after the zoom is computed, because the zoom depends on the bubbles' measured
+ * heights and so cannot be known while they are being built.
+ *
+ * The residual: during the 240ms entrance the node also scales 0.94 -> 1.0, and CSS would
+ * scale the shadow with that too. That is a 6% error for 240ms; correcting it would mean
+ * writing the shadow every frame, which is not worth it. See NOTES.md Stage 23.
+ */
+export function applyShadowScale(built: BuiltBubble, zoom: number): void {
+  const factor = built.scale * zoom;
+  built.shadow.shadowBlur(SHADOW.blur * factor);
+  built.shadow.shadowOffset([SHADOW.offset[0] * factor, SHADOW.offset[1] * factor]);
 }
 
 export interface BubbleOptions {
@@ -100,7 +128,7 @@ function centredPathData(w: number, h: number, scale: number): string {
 }
 
 /** The silhouette, drawn behind content of the given size. */
-function silhouette(w: number, h: number, fill: string, scale: number): Node {
+function silhouette(w: number, h: number, fill: string, scale: number): Path {
   return (
     <Path
       data={centredPathData(w, h, scale)}
@@ -109,7 +137,7 @@ function silhouette(w: number, h: number, fill: string, scale: number): Node {
       shadowBlur={SHADOW.blur * scale}
       shadowOffset={[SHADOW.offset[0] * scale, SHADOW.offset[1] * scale]}
     />
-  ) as unknown as Node;
+  ) as unknown as Path;
 }
 
 /**
@@ -139,7 +167,8 @@ export function buildBubbleNode(
   const palette = PALETTE[from];
 
   const node = new Node({});
-  node.add(silhouette(w, h, palette.fill, scale));
+  const shadow = silhouette(w, h, palette.fill, scale);
+  node.add(shadow);
 
   measured.lines.forEach((line, i) => {
     node.add(
@@ -163,7 +192,7 @@ export function buildBubbleNode(
     );
   });
 
-  return { node, width: w, height: h };
+  return { node, width: w, height: h, shadow, scale };
 }
 
 /**
@@ -188,7 +217,8 @@ export function buildTypingNode(
   const h = rowHeight + 2 * padY;
 
   const node = new Node({});
-  node.add(silhouette(w, h, PALETTE.received.fill, scale));
+  const shadow = silhouette(w, h, PALETTE.received.fill, scale);
+  node.add(shadow);
 
   const dots: Node[] = [];
   for (let i = 0; i < 3; i += 1) {
@@ -204,7 +234,7 @@ export function buildTypingNode(
     node.add(dot);
   }
 
-  return { node, width: w, height: h, dots };
+  return { node, width: w, height: h, shadow, scale, dots };
 }
 
 /** Applies the dot pulse for time `t`. Kept next to the builder so the two cannot drift. */
@@ -242,6 +272,38 @@ export function entranceTransform(
     scale,
     opacity: eased,
   };
+}
+
+/**
+ * The exit: the entrance, played backwards.
+ *
+ * `exitTransform` is defined as the entrance's state at time `ENTER - t`, which is what
+ * "time-reversed" has to mean if the exit is to be the same motion rather than a lookalike.
+ * The entrance at wall time `s` is `entranceTransform(easeOut(s / ENTER))`, so the reverse is
+ *
+ *     entranceTransform(easeOut(1 - t / EXIT))
+ *
+ * and the easing sits INSIDE the mirror. Mirroring the raw progress instead —
+ * `entranceTransform(1 - t / EXIT)` — would run the exit linearly and differ visibly through
+ * the middle of the 240ms, however similar the two endpoints look.
+ *
+ * Written as a call into `entranceTransform` rather than as its own arithmetic, so the
+ * symmetry is a property of the code and not a claim about it: there is one set of
+ * opacity/translateY/scale/corner-anchor maths and both directions read from it. The
+ * mirrored arguments are equal by construction — `easeOut(s / ENTER)` and
+ * `easeOut(1 - (ENTER - s) / ENTER)` are the same number — so the directions agree exactly
+ * rather than closely.
+ *
+ * `exited` is 0 at the moment the bubble starts leaving and 1 once it is gone (see
+ * exitProgress). The source has no exit at all; only the shape of this one is inherited.
+ */
+export function exitTransform(
+  exited: number,
+  from: Sender,
+  width: number,
+  height: number,
+): { x: number; y: number; scale: number; opacity: number } {
+  return entranceTransform(easeOut(1 - exited), from, width, height);
 }
 
 export { COLUMN_W };
