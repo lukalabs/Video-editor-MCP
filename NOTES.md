@@ -75,6 +75,25 @@ Known, deliberate, not yet done. Recorded so they are not rediscovered from scra
   which representation wins. See Stage 27 (text-clip captions) and Stage 29 / PR #1
   (`caption-painter.ts`, project-kit subtitle ops).
 
+- **Clip volume/fade reported dead once, never reproduced.** Reported as "controls
+  visible, changes don't take effect, any clip type". Investigated end to end and every
+  link was sound: the slider drag dispatched `audio/setVolume` (visible in the action
+  history), the store updated, auto-sync wrote `clip.volume` to the server, a reopened
+  project showed the stored value, and two exports measured **-23.8 dB at volume 1.0
+  against -43.8 dB at 0.1** - exactly the -20 dB that 20*log10(0.1) predicts. Fades
+  behaved the same. Nothing in the audio chain had changed: `audio-engine.ts` and
+  `AudioTab.tsx` are untouched since the fork import. The user retried live on the same
+  stack with no code changes and it worked. Treated as transient rather than a defect.
+
+  If it resurfaces, two things to check before re-running the whole trace. First, **a
+  locked track silently swallows the change**: `validateAudioAction` rejects with
+  TRACK_LOCKED and `AudioTab` fires the action as `void executeAction(...)` without
+  looking at the result, so a locked track produces exactly this symptom with no error
+  anywhere. Second, **a stuck pointer capture** from a drag that ended without a pointerup
+  (window blur, alt-tab, an exception mid-drag) can leave a Radix slider deaf to later
+  pointer events until the page is re-rendered. Neither is proven to be what happened;
+  they are just the two cheapest things to rule out.
+
 ## Stage 0 — Environment
 
 | Tool | Version | Status |
