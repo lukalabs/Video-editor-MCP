@@ -55,6 +55,26 @@ Standing rules that apply to future work, kept here so they survive between sess
   `src/render-harness.ts` (import + `PROJECTS` key, which is the id used by the API and CLI)
   and `vite.config.ts` (the `project:` list).
 
+## Open items
+
+Known, deliberate, not yet done. Recorded so they are not rediscovered from scratch.
+
+- **Two live, disconnected caption representations.** The editor writes captions as text
+  clips on a "Captions" track (Whisper, SRT import, the Caption Animation inspector,
+  `exportSRT`). project-kit's subtitle ops write `timeline.subtitles`, painted by
+  `caption-painter.ts` in both preview and export. Both are correct in their own context
+  and neither breaks the other, so they were deliberately left unconnected after PR #1.
+
+  What it costs today: a project built with `project-cli` shows its captions correctly in
+  the editor, but they cannot be restyled through the Caption Animation panel and do not
+  appear in SRT export, because both of those read text clips only. The reverse holds too
+  — captions made in the editor are invisible to the CLI's subtitle ops.
+
+  Revisit when it becomes a real pain point rather than a theoretical one, and ideally
+  with whoever owns the CLI tooling, since bridging the two is a shared decision about
+  which representation wins. See Stage 27 (text-clip captions) and Stage 29 / PR #1
+  (`caption-painter.ts`, project-kit subtitle ops).
+
 ## Stage 0 — Environment
 
 | Tool | Version | Status |
