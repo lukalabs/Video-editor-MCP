@@ -4,6 +4,7 @@ import { test } from "node:test";
 import {
   addClip,
   addMediaItem,
+  addSubtitle,
   addTextClip,
   addTrack,
   addTransition,
@@ -17,7 +18,10 @@ import {
   moveClip,
   removeClip,
   setAudioFade,
+  setCanvasBackground,
+  removeSubtitle,
   setEffect,
+  setSubtitles,
   splitClip,
   trimClip,
 } from "../src/index.js";
@@ -337,4 +341,131 @@ test("trim and move honour the same tolerance", () => {
   // Grow the first clip so it ends exactly where the second now starts.
   const trimmed = trimClip(moved.project, { clipId: first.clipId, duration: 0.30000000000000004 });
   assert.ok(trimmed.project);
+});
+
+/* --------------------------------------------------------------- subtitles */
+
+const CUE = {
+  text: "one two",
+  startTime: 0,
+  endTime: 1.5,
+  words: [
+    { text: "one", startTime: 0, endTime: 0.7 },
+    { text: "two", startTime: 0.7, endTime: 1.5 },
+  ],
+};
+
+test("setSubtitles replaces the list and applies shared defaults", () => {
+  const base = createProject({ name: "captions" });
+  const { project, subtitleCount } = setSubtitles(base, {
+    subtitles: [CUE, { text: "three", startTime: 1.5, endTime: 2.5 }],
+    style: { fontFamily: "Montserrat", fontSize: 72 },
+    animationStyle: "word-highlight",
+  });
+
+  assert.equal(subtitleCount, 2);
+  assert.equal(project.timeline.subtitles.length, 2);
+  for (const subtitle of project.timeline.subtitles) {
+    assert.equal(subtitle.animationStyle, "word-highlight");
+    assert.equal(subtitle.style.fontFamily, "Montserrat");
+    assert.ok(subtitle.id, "every cue gets an id");
+  }
+  // The source project is untouched.
+  assert.equal(base.timeline.subtitles.length, 0);
+});
+
+test("setSubtitles keeps per-cue overrides and word timings", () => {
+  const { project } = setSubtitles(createProject({}), {
+    subtitles: [{ ...CUE, animationStyle: "karaoke" }],
+    animationStyle: "bounce",
+  });
+
+  const [subtitle] = project.timeline.subtitles;
+  assert.equal(subtitle.animationStyle, "karaoke");
+  assert.deepEqual(
+    subtitle.words.map((word) => word.text),
+    ["one", "two"],
+  );
+});
+
+test("setSubtitles extends the timeline duration", () => {
+  const { project } = setSubtitles(createProject({}), {
+    subtitles: [{ text: "late", startTime: 8, endTime: 12 }],
+  });
+  assert.equal(project.timeline.duration, 12);
+});
+
+test("setSubtitles rejects bad cues", () => {
+  const project = createProject({});
+  assert.throws(
+    () => setSubtitles(project, { subtitles: [{ text: "x", startTime: 2, endTime: 1 }] }),
+    (error) => error instanceof ProjectKitError && error.code === "INVALID_TIME_RANGE",
+  );
+  assert.throws(
+    () => setSubtitles(project, { subtitles: [{ ...CUE, animationStyle: "sparkle" }] }),
+    (error) => error instanceof ProjectKitError && error.code === "INVALID_PARAMS",
+  );
+  assert.throws(
+    () => setSubtitles(project, { subtitles: "nope" }),
+    (error) => error instanceof ProjectKitError && error.code === "INVALID_PARAMS",
+  );
+});
+
+test("addSubtitle appends and removeSubtitle deletes by id", () => {
+  const { project: withOne, subtitleId } = addSubtitle(createProject({}), CUE);
+  assert.equal(withOne.timeline.subtitles.length, 1);
+
+  const { project: withTwo } = addSubtitle(withOne, {
+    text: "later",
+    startTime: 2,
+    endTime: 3,
+  });
+  assert.equal(withTwo.timeline.subtitles.length, 2);
+
+  const { project: pruned } = removeSubtitle(withTwo, { subtitleId });
+  assert.equal(pruned.timeline.subtitles.length, 1);
+  assert.equal(pruned.timeline.subtitles[0].text, "later");
+
+  assert.throws(
+    () => removeSubtitle(pruned, { subtitleId: "missing" }),
+    (error) => error instanceof ProjectKitError && error.code === "NOT_FOUND",
+  );
+});
+
+test("subtitle ops are reachable through applyOps", () => {
+  const { project } = applyOps(createProject({}), [
+    { op: "set_subtitles", subtitles: [CUE], animationStyle: "karaoke" },
+    { op: "add_subtitle", text: "tail", startTime: 2, endTime: 3 },
+  ]);
+  assert.equal(project.timeline.subtitles.length, 2);
+  assert.equal(project.timeline.subtitles[0].animationStyle, "karaoke");
+});
+
+test("setCanvasBackground paints a colour behind letterboxed clips, and clears it again", () => {
+  const project = createProject({ width: 1080, height: 1920 });
+
+  const filled = setCanvasBackground(project, { mode: "color", color: "#f5f5f5" }).project;
+  assert.equal(filled.timeline.backgroundFillMode, "color");
+  assert.equal(filled.timeline.layoutBackgroundColor, "#f5f5f5");
+
+  const blurred = setCanvasBackground(filled, { mode: "blur" }).project;
+  assert.equal(blurred.timeline.backgroundFillMode, "blur");
+
+  const cleared = setCanvasBackground(blurred, { mode: "none" }).project;
+  assert.equal(cleared.timeline.backgroundFillMode, undefined);
+  assert.equal(cleared.timeline.layoutBackgroundColor, undefined);
+});
+
+test("setCanvasBackground rejects a mode it cannot paint and a colour it cannot read", () => {
+  const project = createProject();
+  expectCode(() => setCanvasBackground(project, { mode: "rainbow" }), "INVALID_PARAMS");
+  expectCode(() => setCanvasBackground(project, { mode: "color", color: "f5f5f5" }), "INVALID_PARAMS");
+  expectCode(() => setCanvasBackground(project, { mode: "color" }), "INVALID_PARAMS");
+});
+
+test("set_canvas_background is reachable through applyOps", () => {
+  const { project } = applyOps(createProject({ width: 1080, height: 1920 }), [
+    { op: "set_canvas_background", mode: "color", color: "#102030" },
+  ]);
+  assert.equal(project.timeline.layoutBackgroundColor, "#102030");
 });

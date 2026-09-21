@@ -196,11 +196,18 @@ export function createProject({ name = "Untitled", width = 1920, height = 1080, 
 
 /* -------------------------------------------------------------- operations */
 
-export function addTrack(project, { name, type = "video" } = {}) {
+/**
+ * `role` is the track's editorial meaning. "captions" is the one the editor acts on: its
+ * own caption feature puts one text clip per cue on a track marked that way, which is what
+ * makes captions a draggable layer rather than an overlay.
+ */
+export function addTrack(project, { name, type = "video", role, mode } = {}) {
   const next = clone(project);
   const track = {
     id: `track-${randomUUID()}`,
     type,
+    ...(role ? { role } : {}),
+    ...(mode ? { mode } : {}),
     name: name ?? `Video ${next.timeline.tracks.length + 1}`,
     clips: [],
     transitions: [],
@@ -471,7 +478,7 @@ export function setAudioFade(project, { clipId, fadeInSeconds, fadeOutSeconds })
  * editor loads them into its title engine, and they render in the export.
  */
 export function addTextClip(project, {
-  trackId, text, startTime = 0, duration = 3, style = {}, transform = {},
+  trackId, text, startTime = 0, duration = 3, style = {}, transform = {}, metadata,
 }) {
   requireTrack(project, trackId);
   if (typeof text !== "string" || !text) fail("INVALID_PARAMS", "text is required");
@@ -484,6 +491,7 @@ export function addTextClip(project, {
     duration: requireFiniteNumber(duration, "duration", { min: 0.001 }),
     text,
     style: { ...DEFAULT_TEXT_STYLE, ...clone(style) },
+    ...(metadata ? { metadata: clone(metadata) } : {}),
     transform: {
       position: { x: 0.5, y: 0.5 },
       scale: { x: 1, y: 1 },
@@ -536,7 +544,144 @@ export function renameProject(project, { name }) {
   return { project: finish(next), name };
 }
 
+/**
+ * The canvas fill behind clips whose aspect differs from the project — a 16:9 packshot
+ * centred in a 1080x1920 project, say. "color" paints `layoutBackgroundColor`, "blur"
+ * paints a blurred cover-fit copy of the base clip, and "none" restores the default
+ * black bars. Both fields are part of the shared project JSON and are read by the
+ * preview and the export alike (core/src/video/video-engine.ts).
+ */
+export function setCanvasBackground(project, { mode = "color", color } = {}) {
+  if (!["color", "blur", "none"].includes(mode)) {
+    fail("INVALID_PARAMS", `mode must be "color", "blur" or "none" (got "${mode}")`);
+  }
+  if (mode === "color" && !/^#[0-9a-fA-F]{6}$/.test(String(color ?? ""))) {
+    fail("INVALID_PARAMS", `color must be a #rrggbb hex when mode is "color" (got "${color}")`);
+  }
+
+  const next = clone(project);
+  if (mode === "none") {
+    delete next.timeline.backgroundFillMode;
+    delete next.timeline.layoutBackgroundColor;
+  } else {
+    next.timeline.backgroundFillMode = mode;
+    if (mode === "color") next.timeline.layoutBackgroundColor = color;
+  }
+  return { project: finish(next), mode, ...(mode === "color" ? { color } : {}) };
+}
+
 /* ------------------------------------------------------------ op dispatch */
+
+/* --------------------------------------------------------------- subtitles */
+
+/** Caption animations the renderer implements (core/src/text/caption-animation-renderer.ts). */
+export const CAPTION_ANIMATION_STYLES = [
+  "none", "word-highlight", "word-by-word", "karaoke", "bounce", "typewriter",
+];
+
+/**
+ * Subtitles live in `timeline.subtitles`, not on a track, because the editor hands the
+ * whole list to the caption renderer on load.
+ *
+ * `words` carries per-word timings. Every animation except "none" needs them: without
+ * them `renderAnimatedCaption` falls back to drawing the cue as one static line.
+ */
+function normalizeSubtitle(entry, index, { style, animationStyle }) {
+  if (!entry || typeof entry !== "object") {
+    fail("INVALID_PARAMS", `subtitles[${index}] must be an object`);
+  }
+  if (typeof entry.text !== "string" || !entry.text.trim()) {
+    fail("INVALID_PARAMS", `subtitles[${index}].text is required`);
+  }
+
+  const startTime = requireFiniteNumber(entry.startTime, `subtitles[${index}].startTime`);
+  const endTime = requireFiniteNumber(entry.endTime, `subtitles[${index}].endTime`);
+  if (endTime <= startTime) {
+    fail("INVALID_TIME_RANGE", `subtitles[${index}]: endTime must be greater than startTime`);
+  }
+
+  const resolvedAnimation = entry.animationStyle ?? animationStyle;
+  if (resolvedAnimation !== undefined && !CAPTION_ANIMATION_STYLES.includes(resolvedAnimation)) {
+    fail(
+      "INVALID_PARAMS",
+      `subtitles[${index}]: unknown animationStyle "${resolvedAnimation}". ` +
+        `Known: ${CAPTION_ANIMATION_STYLES.join(", ")}`,
+    );
+  }
+
+  let words;
+  if (entry.words !== undefined) {
+    if (!Array.isArray(entry.words)) {
+      fail("INVALID_PARAMS", `subtitles[${index}].words must be an array`);
+    }
+    words = entry.words.map((word, wordIndex) => {
+      const label = `subtitles[${index}].words[${wordIndex}]`;
+      if (!word || typeof word.text !== "string" || !word.text.trim()) {
+        fail("INVALID_PARAMS", `${label}.text is required`);
+      }
+      const wordStart = requireFiniteNumber(word.startTime, `${label}.startTime`);
+      const wordEnd = requireFiniteNumber(word.endTime, `${label}.endTime`);
+      if (wordEnd < wordStart) {
+        fail("INVALID_TIME_RANGE", `${label}: endTime must be >= startTime`);
+      }
+      return { text: word.text, startTime: wordStart, endTime: wordEnd };
+    });
+  }
+
+  const resolvedStyle = entry.style ?? style;
+
+  return {
+    id: entry.id ?? `subtitle-${randomUUID()}`,
+    text: entry.text,
+    startTime,
+    endTime,
+    ...(resolvedStyle ? { style: clone(resolvedStyle) } : {}),
+    ...(words ? { words } : {}),
+    ...(resolvedAnimation ? { animationStyle: resolvedAnimation } : {}),
+  };
+}
+
+/**
+ * Replaces the whole subtitle list. `style` and `animationStyle` are defaults applied to
+ * every cue that does not carry its own, so a caption pass is one call.
+ */
+export function setSubtitles(project, { subtitles, style, animationStyle } = {}) {
+  if (!Array.isArray(subtitles)) fail("INVALID_PARAMS", "subtitles must be an array");
+
+  const next = clone(project);
+  next.timeline.subtitles = subtitles.map((entry, index) =>
+    normalizeSubtitle(entry, index, { style, animationStyle }),
+  );
+  return { project: finish(next), subtitleCount: next.timeline.subtitles.length };
+}
+
+/** Appends one cue, leaving the rest of the list alone. */
+export function addSubtitle(project, { text, startTime, endTime, words, style, animationStyle } = {}) {
+  const next = clone(project);
+  const subtitle = normalizeSubtitle(
+    { text, startTime, endTime, words, style, animationStyle },
+    next.timeline.subtitles?.length ?? 0,
+    {},
+  );
+  next.timeline.subtitles = next.timeline.subtitles ?? [];
+  next.timeline.subtitles.push(subtitle);
+  return { project: finish(next), subtitleId: subtitle.id };
+}
+
+/** Removes one cue by id. */
+export function removeSubtitle(project, { subtitleId } = {}) {
+  if (typeof subtitleId !== "string" || !subtitleId) {
+    fail("INVALID_PARAMS", "subtitleId is required");
+  }
+  const next = clone(project);
+  const existing = next.timeline.subtitles ?? [];
+  const remaining = existing.filter((subtitle) => subtitle.id !== subtitleId);
+  if (remaining.length === existing.length) {
+    fail("NOT_FOUND", `Unknown subtitle "${subtitleId}"`);
+  }
+  next.timeline.subtitles = remaining;
+  return { project: finish(next), subtitleId };
+}
 
 export const OPERATIONS = {
   add_track: addTrack,
@@ -553,6 +698,10 @@ export const OPERATIONS = {
   add_text_clip: addTextClip,
   add_transition: addTransition,
   rename_project: renameProject,
+  set_canvas_background: setCanvasBackground,
+  set_subtitles: setSubtitles,
+  add_subtitle: addSubtitle,
+  remove_subtitle: removeSubtitle,
 };
 
 /**

@@ -1,0 +1,131 @@
+{
+  "id": "button",
+  "name": "Button",
+  "description": "A UI button rendered on transparency. Size, colour, radius, filled or outlined and the entrance animation are all parameters, so one component covers the whole button set.",
+  "project": "src/projects/button.ts",
+  "durationParam": "durationInSeconds",
+  "defaultWidth": 1920,
+  "defaultHeight": 1080,
+  "params": [
+    {
+      "key": "label",
+      "label": "Label",
+      "type": "text",
+      "default": "Get started"
+    },
+    {
+      "key": "fillColor",
+      "label": "Fill colour",
+      "type": "color",
+      "default": "#34d399"
+    },
+    {
+      "key": "textColor",
+      "label": "Text colour",
+      "type": "color",
+      "default": "#0b1220"
+    },
+    {
+      "key": "width",
+      "label": "Width",
+      "type": "number",
+      "default": 420,
+      "min": 120,
+      "max": 1200,
+      "step": 10
+    },
+    {
+      "key": "height",
+      "label": "Height",
+      "type": "number",
+      "default": 120,
+      "min": 48,
+      "max": 400,
+      "step": 4
+    },
+    {
+      "key": "cornerRadius",
+      "label": "Corner radius",
+      "type": "number",
+      "default": 60,
+      "min": 0,
+      "max": 200,
+      "step": 2
+    },
+    {
+      "key": "fontSize",
+      "label": "Font size",
+      "type": "number",
+      "default": 42,
+      "min": 12,
+      "max": 120,
+      "step": 1
+    },
+    {
+      "key": "outlined",
+      "label": "Outlined",
+      "type": "boolean",
+      "default": false
+    },
+    {
+      "key": "borderWidth",
+      "label": "Border width",
+      "type": "number",
+      "default": 4,
+      "min": 1,
+      "max": 16,
+      "step": 1
+    },
+    {
+      "key": "shadow",
+      "label": "Drop shadow",
+      "type": "boolean",
+      "default": true
+    },
+    {
+      "key": "positionY",
+      "label": "Vertical position (0 top / 1 bottom)",
+      "type": "number",
+      "default": 0.5,
+      "min": 0.05,
+      "max": 0.95,
+      "step": 0.01
+    },
+    {
+      "key": "holdToEnd",
+      "label": "Stay on screen (no fade out)",
+      "type": "boolean",
+      "default": false
+    },
+    {
+      "key": "slideSeconds",
+      "label": "Slide travel time (s)",
+      "type": "number",
+      "default": 0.8,
+      "min": 0.3,
+      "max": 3,
+      "step": 0.1
+    },
+    {
+      "key": "animation",
+      "label": "Animation (fadeIn / popIn / lift / slideUp / press / pulse)",
+      "type": "text",
+      "default": "popIn"
+    },
+    {
+      "key": "easing",
+      "label": "Easing (soft / snappy / springy / even)",
+      "type": "text",
+      "default": "soft"
+    },
+    {
+      "key": "durationInSeconds",
+      "label": "Duration (s)",
+      "type": "number",
+      "default": 3,
+      "min": 1.5,
+      "max": 12,
+      "step": 0.5
+    }
+  ]
+}

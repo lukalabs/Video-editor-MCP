@@ -8,10 +8,16 @@ import { RecoveryDialog } from "./components/welcome/RecoveryDialog";
 import { SharePage } from "./pages/SharePage";
 import { useUIStore } from "./stores/ui-store";
 import { useProjectStore } from "./stores/project-store";
+import { toast } from "./stores/notification-store";
 import { useRouter } from "./hooks/use-router";
 import { useProjectRecovery } from "./hooks/useProjectRecovery";
 import { useKieAIPoller } from "./hooks/useKieAIPoller";
-import { SOCIAL_MEDIA_PRESETS, type SocialMediaCategory } from "@openreel/core";
+import {
+  SOCIAL_MEDIA_PRESETS,
+  createProjectSerializer,
+  createStorageEngine,
+  type SocialMediaCategory,
+} from "@openreel/core";
 import { ToolcraftText as Text } from "@openreel/ui";
 
 const EditorInterface = lazy(() =>
@@ -115,6 +121,96 @@ function App() {
     navigate,
     skipWelcomeScreen,
   ]);
+
+  // `?open=<url>` loads a project JSON straight into the editor, so a project built
+  // outside the browser (see tools/project-cli) can be opened with a link rather than
+  // hand-imported. The URL must be same-origin: serve the file from the dev server.
+  const openedProjectUrl = useRef<string | null>(null);
+  useEffect(() => {
+    if (!params.open) return;
+    const requested = `${params.open}|${params.media ?? ""}`;
+    if (openedProjectUrl.current === requested) return;
+    openedProjectUrl.current = requested;
+
+    const url = params.open;
+    const mediaBase = params.media;
+    void (async () => {
+      try {
+        const response = await fetch(url);
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const serializer = createProjectSerializer(createStorageEngine());
+        const { project, validation } = serializer.importFromJsonWithValidation(
+          await response.text(),
+        );
+        if (!project || !validation.valid) {
+          toast.error(
+          "Could not open project",
+            validation.errors[0] ?? "The file did not validate",
+          );
+          return;
+        }
+
+        useProjectStore.getState().loadProject(project);
+        navigate("editor");
+
+        // A project built outside the browser has no media blobs, only file names. With
+        // `media=<base>` the loader fetches each one by name and attaches it, so the
+        // project opens ready to play instead of asking for a manual relink.
+        const missing = project.mediaLibrary.items.filter((item) => !item.blob);
+        if (missing.length === 0) return;
+
+        if (!mediaBase) {
+          toast.warning(
+            `${missing.length} asset${missing.length !== 1 ? "s" : ""} need relinking`,
+            'Assets panel -> "Relink from Folder" to restore the media.',
+          );
+          return;
+        }
+
+        const base = mediaBase.replace(/\/$/, "");
+        let restored = 0;
+        const failures: string[] = [];
+        for (const item of missing) {
+          const fileName = item.sourceFile?.name ?? item.name;
+          try {
+            const media = await fetch(`${base}/${encodeURIComponent(fileName)}`);
+            if (!media.ok) continue;
+            const blob = await media.blob();
+            const file = new File([blob], fileName, {
+              type: blob.type || media.headers.get("content-type") || "",
+            });
+            const result = await useProjectStore
+              .getState()
+              .replaceMediaAsset(item.id, file, base);
+            if (result?.success === false) {
+              failures.push(`${fileName}: ${result.error?.message ?? "could not be decoded"}`);
+              continue;
+            }
+            restored += 1;
+          } catch (error) {
+            failures.push(
+              `${fileName}: ${error instanceof Error ? error.message : String(error)}`,
+            );
+          }
+        }
+
+        if (restored === missing.length) {
+          toast.success(`Loaded ${restored} asset${restored !== 1 ? "s" : ""}`);
+        } else {
+          toast.warning(
+            `Loaded ${restored} of ${missing.length} assets`,
+            failures[0] ?? 'Assets panel -> "Relink from Folder" for the rest.',
+          );
+          console.warn("[open] assets that did not load:", failures);
+        }
+      } catch (error) {
+        toast.error(
+          "Could not open project",
+          error instanceof Error ? error.message : String(error),
+        );
+      }
+    })();
+  }, [params.open, params.media, navigate]);
 
   const handleKeyDown = useCallback(
     (e: KeyboardEvent) => {

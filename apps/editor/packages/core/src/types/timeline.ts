@@ -322,6 +322,27 @@ export interface SubtitleStyle {
   readonly position: "top" | "center" | "bottom";
   readonly highlightColor?: string;
   readonly upcomingColor?: string;
+  /** Font weight used when painting. Defaults to "bold". */
+  readonly fontWeight?: string;
+  /** Stroke drawn around the glyphs. Skipped when width is absent or 0. */
+  readonly outlineColor?: string;
+  readonly outlineWidth?: number;
+  /**
+   * Solid block painted behind the active word only. Skipped when absent.
+   * `highlightRadius` rounds its corners.
+   */
+  readonly highlightBackgroundColor?: string;
+  readonly highlightRadius?: number;
+  /** Drop shadow behind the glyphs. Skipped when blur and offset are absent. */
+  readonly shadowColor?: string;
+  readonly shadowBlur?: number;
+  readonly shadowOffsetY?: number;
+  /**
+   * Caption baseline as a fraction of canvas height, 0 at the top and 1 at the
+   * bottom. Overrides `position` when set, so captions can clear the platform
+   * UI that covers the lower fifth of a vertical frame.
+   */
+  readonly verticalAnchor?: number;
 }
 
 export interface AutomationPoint {

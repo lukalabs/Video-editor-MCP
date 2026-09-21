@@ -12,6 +12,7 @@ export default defineConfig({
     (motionCanvas as typeof motionCanvasModule)({
       project: [
         "./src/projects/stat-counter.ts",
+        "./src/projects/button.ts",
         "./src/projects/turbulent-background-Rep.ts",
         "./src/projects/orbit-headline-Rep.ts",
         "./src/projects/chat-bubble-single-Rep.ts",

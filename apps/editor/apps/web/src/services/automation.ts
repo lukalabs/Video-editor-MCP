@@ -91,6 +91,37 @@ const state: {
 } = { status: "idle", progress: 0, phase: "", error: null, bytes: null };
 
 /**
+ * Waits for every font the project paints with.
+ *
+ * Canvas takes no part in font loading: `ctx.font = '900 84px "Montserrat"'` silently
+ * falls back to a serif when the face has not arrived yet, and the export encodes that
+ * frame as readily as any other. A headless export starts on a cold page, so the first
+ * second of captions came out in Times while Montserrat was still in flight.
+ */
+async function loadProjectFonts(project: {
+  timeline?: { subtitles?: { style?: { fontFamily?: string; fontWeight?: string | number; fontSize?: number } }[] };
+  textClips?: { style?: { fontFamily?: string; fontWeight?: string | number; fontSize?: number } }[];
+}): Promise<void> {
+  if (!document.fonts) return;
+
+  const specs = new Set<string>();
+  const add = (style?: { fontFamily?: string; fontWeight?: string | number; fontSize?: number }) => {
+    if (!style?.fontFamily) return;
+    const weight = style.fontWeight ?? 400;
+    const size = style.fontSize ?? 16;
+    specs.add(`${weight} ${size}px "${style.fontFamily}"`);
+  };
+
+  for (const subtitle of project.timeline?.subtitles ?? []) add(subtitle.style);
+  for (const clip of project.textClips ?? []) add(clip.style);
+
+  // A family the page has no @font-face for rejects; the fallback it would have used is
+  // what the canvas paints either way, so a miss must not fail the load.
+  await Promise.all([...specs].map((spec) => document.fonts.load(spec).catch(() => undefined)));
+  await document.fonts.ready;
+}
+
+/**
  * Loads a server project into the store, rehydrating media blobs from `/media/:id`.
  * Mirrors what the Projects panel does — the same code path a human would take.
  */
@@ -116,6 +147,7 @@ async function loadProjectById(id: string) {
     const restored = items.filter((item) => !item.isPlaceholder).length;
     useProjectStore.getState().loadProject({ ...incoming, mediaLibrary: { items } });
     await refreshRegistry();
+    await loadProjectFonts(incoming);
 
     const project = useProjectStore.getState().getFullProject();
     return {

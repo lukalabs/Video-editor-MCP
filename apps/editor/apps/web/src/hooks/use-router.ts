@@ -19,6 +19,10 @@ export interface RouteParams {
   tab?: string;
   shareId?: string;
   compositionId?: string;
+  /** URL of a project JSON to open on load — see `open` handling in App.tsx. */
+  open?: string;
+  /** Base URL holding the project's media, so `open` can resolve it without relinking. */
+  media?: string;
 }
 
 export interface RouterState {
