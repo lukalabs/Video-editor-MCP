@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { readFile } from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
 
@@ -112,6 +113,26 @@ Available ops:
     wipe/slide take { direction: "left"|"right"|"up"|"down" }, dipToBlack takes
     { holdDuration }).
 
+- set_clip_mask { clipId, svg? | svgPath? | points?, feather?, expansion?, inverted?, opacity?, replace? }
+    Masks a clip to a shape, so only what is inside the shape shows. Give the shape ONE of:
+      svg      - SVG markup as a string
+      svgPath  - a path to an .svg file on this machine, read for you
+      points   - the outline directly, as [{ x, y, handleIn?, handleOut? }, …]
+    Coordinates are 0-1 of the frame ({ x: 0.5, y: 0.5 } is the centre); handleIn/handleOut
+    are absolute points in the same space, not offsets, and omitting them gives a straight
+    edge. Only SINGLE-PATH SVGs are accepted: a file with several paths, groups, or shapes
+    like <rect> is rejected with a count rather than flattened, and so are elliptical arcs
+    (A commands), transform attributes and paths with more than one subpath (a shape with a
+    hole). The artwork is fitted inside the frame with its aspect ratio kept, not stretched.
+    feather softens the edge in pixels, expansion grows (+) or shrinks (-) the shape,
+    inverted hides what is inside instead, opacity is 0-1. Adds to any masks the clip
+    already has; replace: true clears that clip's masks first. The result is an ordinary
+    editable mask, identical to importing the same file in the editor's Mask panel.
+    Returns { maskId, pointCount, warnings }.
+
+- remove_clip_mask { clipId }
+    Removes every mask on the clip. Returns { removed }.
+
 - rename_project { name }
 `.trim();
 
@@ -140,6 +161,35 @@ function ok(summary, data) {
 function fail(error) {
   const message = error instanceof Error ? error.message : String(error);
   return { content: [{ type: "text", text: `Error: ${message}` }], isError: true };
+}
+
+/**
+ * Turns `svgPath` into `svg` by reading the file here.
+ *
+ * The ops themselves are pure JSON applied on the server, which has no access to the
+ * caller's disk and no business doing file I/O - but an agent with an .svg on hand should
+ * not have to inline it by hand. Reading it at this edge keeps both of those true.
+ */
+async function resolveSvgPaths(ops) {
+  const out = [];
+  for (const entry of ops) {
+    if (!entry || typeof entry.svgPath !== "string") {
+      out.push(entry);
+      continue;
+    }
+    const { svgPath, ...rest } = entry;
+    if (rest.svg !== undefined) {
+      throw new Error("Pass either svg or svgPath to set_clip_mask, not both.");
+    }
+    let svg;
+    try {
+      svg = await readFile(svgPath, "utf8");
+    } catch (error) {
+      throw new Error(`Could not read the SVG at ${svgPath}: ${error.message}`);
+    }
+    out.push({ ...rest, svg });
+  }
+  return out;
 }
 
 server.registerTool(
@@ -497,10 +547,14 @@ server.registerTool(
   },
   async ({ projectId, ops }) => {
     try {
+      const resolved = await resolveSvgPaths(ops);
       // Load-then-write: fetch the current updatedAt and pass it as the guard, so a
       // concurrent change surfaces as a conflict instead of an overwrite.
       const current = await service.getProject(projectId);
-      const applied = await service.applyOps(projectId, { ops, expectedUpdatedAt: current.updatedAt });
+      const applied = await service.applyOps(projectId, {
+        ops: resolved,
+        expectedUpdatedAt: current.updatedAt,
+      });
       return ok(
         `Applied ${ops.length} operation(s). Timeline is now ${applied.timelineDuration}s.`,
         {

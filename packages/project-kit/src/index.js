@@ -1,5 +1,14 @@
 import { randomUUID } from "node:crypto";
 
+// The editor's own SVG parser, imported rather than reimplemented: a second copy would
+// drift, and a mask that imports differently here than in the UI is the preview/export
+// divergence this project keeps paying for. It is plain JavaScript precisely so this
+// side - plain Node, no build step, no pnpm workspace - can load the very same file.
+import {
+  parseSvgToMaskPath,
+  SvgMaskImportError,
+} from "../../../apps/editor/packages/core/src/video/svg-mask-path.js";
+
 /**
  * Pure JSON operations over an OpenReel project.
  *
@@ -683,6 +692,108 @@ export function removeSubtitle(project, { subtitleId } = {}) {
   return { project: finish(next), subtitleId };
 }
 
+/* ------------------------------------------------------------------ masks */
+
+/** Every point must be inside the frame, or the mask is silently clipped at render. */
+function normalizeMaskPoint(point, index) {
+  if (!point || typeof point !== "object") {
+    fail("INVALID_PARAMS", `points[${index}] must be an object with x and y`);
+  }
+  const at = (value, name) => {
+    const number = Number(value);
+    if (!Number.isFinite(number)) {
+      fail("INVALID_PARAMS", `points[${index}].${name} must be a finite number`);
+    }
+    return number;
+  };
+  const out = { x: at(point.x, "x"), y: at(point.y, "y") };
+  // Handles are absolute normalized points, not deltas - see the mask engine's renderer.
+  if (point.handleIn) out.handleIn = normalizeMaskPoint(point.handleIn, index);
+  if (point.handleOut) out.handleOut = normalizeMaskPoint(point.handleOut, index);
+  return out;
+}
+
+/**
+ * Attaches a mask to a clip, from an SVG or from raw path points.
+ *
+ * Coordinates are normalized 0..1 of the composition, which is what the mask engine
+ * multiplies by the canvas size - the same numbers the editor's Path Points fields show
+ * as percentages. The result is an ordinary "drawn" mask, so anything imported here is
+ * editable by hand in the UI afterwards.
+ *
+ * `svg` is markup, not a path on disk: project-kit is pure and synchronous by design, so
+ * reading files is the caller's job (the MCP server does it).
+ *
+ * By default a new mask is added alongside any the clip already has; `replace: true`
+ * drops the clip's existing masks first, which is what an agent re-running a step wants.
+ */
+export function setClipMask(
+  project,
+  { clipId, svg, points, feather, expansion, inverted, opacity, replace = false } = {},
+) {
+  requireClip(project, clipId);
+
+  if ((svg === undefined) === (points === undefined)) {
+    fail("INVALID_PARAMS", "set_clip_mask needs exactly one of svg or points");
+  }
+
+  const next = clone(project);
+  let path;
+  /** @type {string[]} */
+  let warnings = [];
+
+  if (svg !== undefined) {
+    if (typeof svg !== "string") fail("INVALID_PARAMS", "svg must be a string of SVG markup");
+    try {
+      const parsed = parseSvgToMaskPath(svg, {
+        compositionWidth: next.settings.width,
+        compositionHeight: next.settings.height,
+      });
+      path = parsed.path;
+      warnings = parsed.warnings;
+    } catch (error) {
+      if (error instanceof SvgMaskImportError) fail("INVALID_SVG", error.message);
+      throw error;
+    }
+  } else {
+    if (!Array.isArray(points) || points.length < 3) {
+      fail("INVALID_PARAMS", "points must be an array of at least 3 {x, y} objects");
+    }
+    path = { points: points.map(normalizeMaskPoint), closed: true };
+  }
+
+  const mask = {
+    id: randomUUID(),
+    clipId,
+    type: "drawn",
+    path,
+    feathering: feather === undefined ? 0 : requireFiniteNumber(feather, "feather"),
+    inverted: inverted === undefined ? false : Boolean(inverted),
+    expansion: expansion === undefined ? 0 : Number(expansion),
+    opacity: opacity === undefined ? 1 : requireFiniteNumber(opacity, "opacity"),
+    keyframes: [],
+  };
+  if (!Number.isFinite(mask.expansion)) {
+    fail("INVALID_PARAMS", "expansion must be a finite number");
+  }
+
+  const existing = next.masks ?? [];
+  next.masks = replace ? existing.filter((item) => item.clipId !== clipId) : existing;
+  next.masks.push(mask);
+
+  return { project: finish(next), maskId: mask.id, pointCount: path.points.length, warnings };
+}
+
+/** Removes every mask on a clip. */
+export function removeClipMask(project, { clipId } = {}) {
+  requireClip(project, clipId);
+  const next = clone(project);
+  const existing = next.masks ?? [];
+  const remaining = existing.filter((mask) => mask.clipId !== clipId);
+  next.masks = remaining;
+  return { project: finish(next), removed: existing.length - remaining.length };
+}
+
 export const OPERATIONS = {
   add_track: addTrack,
   add_media: addMediaItem,
@@ -702,6 +813,8 @@ export const OPERATIONS = {
   set_subtitles: setSubtitles,
   add_subtitle: addSubtitle,
   remove_subtitle: removeSubtitle,
+  set_clip_mask: setClipMask,
+  remove_clip_mask: removeClipMask,
 };
 
 /**

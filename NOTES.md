@@ -3843,3 +3843,82 @@ not the intermediate that is convenient to measure. Three rounds of work went in
 layer because the component file kept coming back clean.
 
 Defaults after review: `easing: soft` (easeOutCubic), `slideSeconds: 0.8`.
+
+## Stage 29 — SVG mask import
+
+### Why
+
+Masking a clip to a real shape — a logo, a silhouette — meant typing point
+percentages into the inspector one at a time. Designers already have the shape
+as an SVG; there was nowhere to put it, in the UI or from an agent.
+
+### One parser, in plain JavaScript, on purpose
+
+`packages/core/src/video/svg-mask-path.js` — with a hand-written `.d.ts` beside
+it — is the whole conversion, and both callers import that same file.
+
+It is JavaScript rather than TypeScript because of a boundary worth writing
+down: `apps/editor` is a pnpm/TypeScript/Vite workspace whose `@openreel/core`
+resolves to raw `src/index.ts`, while project-kit, render-service and the MCP
+server are plain Node ESM in a **separate dependency universe** that reaches
+project-kit by relative path and has no build step. A `.ts` module is simply not
+loadable from that side. Publishing the parser as JavaScript is what makes
+"reuse the same parser" literally true instead of aspirational — project-kit
+imports `../../../apps/editor/packages/core/src/video/svg-mask-path.js`.
+
+The alternative was a second implementation on the Node side. project-kit's own
+header already admits to porting the store's validation rules; a second *parser*
+would have been the same bet on a much larger surface, and mask geometry that
+imports differently in the UI than through the ops layer is exactly the
+preview/export divergence this project keeps paying for.
+
+### Coordinates
+
+Output is normalized 0..1 of the composition — what `MaskEngine` multiplies by
+the canvas size. Handles are **absolute** normalized points, not deltas:
+`handleOut` of a point is cp1 of the segment leaving it, `handleIn` of the next
+is cp2. Omitted handles make the renderer interpolate collinear control points,
+so SVG `L` needs no special case — lines come out straight for free.
+
+Quadratics are raised to the exact cubic (cp = p + 2/3(q - p)), not sampled.
+
+### Fitted, not stretched
+
+The artwork is fitted inside the frame with its aspect ratio kept and centred.
+A mask usually carries a meaningful silhouette; stretching a circle into an
+ellipse defeats the point of importing that exact shape. Verified numerically:
+a 512-unit square viewBox in a 1080x1920 project puts the star's tip at 24.51%,
+which is `(1920-1080)/2/1920 + 24*(1080/512)/1920` exactly.
+
+### Refused, not flattened
+
+Multi-path and multi-layer files are rejected with a count ("this file has 3
+paths and 1 group"), never auto-merged — silently combining layers produces a
+shape nobody drew and gives the user no way to see what was lost. Also refused:
+elliptical arcs (`A`), `transform` attributes, and several subpaths in one `d`
+(a shape with a hole). Supported: `M L H V C S Q T Z`, absolute and relative,
+and the compact number forms real exporters emit.
+
+Two anchors joined by curves are accepted, not rejected as degenerate — the
+renderer wraps around, so a lens is two points and four handles. Only a straight
+two-point path encloses nothing.
+
+### Ops
+
+`set_clip_mask { clipId, svg? | svgPath? | points?, feather?, expansion?,
+inverted?, opacity?, replace? }` and `remove_clip_mask { clipId }`.
+
+`svgPath` is resolved in the **MCP server**, not in project-kit: the ops are
+pure JSON applied on a server with no access to the caller's disk, so the file
+read belongs at that edge.
+
+### Verified
+
+Star imported in the real editor at 9:16: preview and a frame-sampled export
+agree, and both are genuinely star-shaped — all five arms lit, the notch between
+the bottom legs and all four corners dark, which a bounding box would not give.
+A circle built from four cubics, applied through the op and exported, measures
+radius 486/487 px in all four directions against a predicted 486.
+
+Restarting the render-service is what loads a new op into `/projects/:id/ops`;
+the module list is read at import.

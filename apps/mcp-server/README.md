@@ -119,6 +119,17 @@ debugging time in earlier stages are stated where the model reads them:
   clip built from media with no metadata has no duration to fall back on.
 - Every op's optional params are described as optional with their defaults, so the model
   doesn't invent parameter objects for `dipToBlack`.
+- `set_clip_mask` states that only **single-path** SVGs are accepted and that multi-layer
+  files are rejected with a count rather than flattened, so the model fixes the file
+  instead of retrying the same one. It also names what is out of scope — arcs (`A`),
+  `transform` attributes, multi-subpath shapes — because those are the cases a design tool
+  emits by default and the fix is an export setting, not a different call.
+
+`set_clip_mask` accepts `svgPath` as well as `svg`. The file is read **here**, in the MCP
+server, and sent as markup: the ops themselves are pure JSON applied on a service that has
+no access to the caller's disk. The parsing is the editor's own module
+(`packages/core/src/video/svg-mask-path.js`), imported by project-kit rather than
+reimplemented, so a mask built by an agent is identical to one imported in the UI.
 
 ### Concurrency
 

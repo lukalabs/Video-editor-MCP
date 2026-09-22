@@ -1,9 +1,10 @@
-import React, { useState, useCallback, useMemo, useEffect } from "react";
+import React, { useState, useCallback, useMemo, useEffect, useRef } from "react";
 import {
   Square,
   Circle,
   Pentagon,
   Pen,
+  FileUp,
   Layers,
   Trash2,
   Eye,
@@ -27,7 +28,8 @@ import { PropertySlider } from "./shell/PropertySlider";
 import { useEngineStore } from "../../../stores/engine-store";
 import { useProjectStore } from "../../../stores/project-store";
 import type { BezierPath, Mask, MaskShape } from "@openreel/core";
-import { boundsPathFromTransform } from "@openreel/core";
+import { boundsPathFromTransform, parseSvgToMaskPath, SvgMaskImportError } from "@openreel/core";
+import { toast } from "../../../stores/notification-store";
 
 interface MaskSectionProps {
   clipId: string;
@@ -387,6 +389,7 @@ export const MaskSection: React.FC<MaskSectionProps> = ({ clipId }) => {
   const getMaskEngine = useEngineStore((state) => state.getMaskEngine);
   const project = useProjectStore((s) => s.project);
   const getAllTextClips = useProjectStore((s) => s.getAllTextClips);
+  const svgInputRef = useRef<HTMLInputElement>(null);
   const [selectedMaskId, setSelectedMaskId] = useState<string | null>(null);
   const [expandedMasks, setExpandedMasks] = useState<Set<string>>(new Set());
   const [refreshKey, setRefreshKey] = useState(0);
@@ -626,6 +629,48 @@ export const MaskSection: React.FC<MaskSectionProps> = ({ clipId }) => {
     triggerRefresh();
   }, [clipId, maskEngine, triggerRefresh]);
 
+  /**
+   * Imports a single-path SVG as an ordinary drawn mask.
+   *
+   * It lands as the same "drawn" type the Custom button creates, so the Path Points UI
+   * below can edit it immediately - an imported shape is a starting point, not a
+   * separate kind of mask. Rejections happen before anything is created, so a file we
+   * refuse leaves no half-made mask behind.
+   */
+  const handleImportSvg = useCallback(
+    async (file: File) => {
+      if (!maskEngine) return;
+
+      try {
+        const { path, warnings } = parseSvgToMaskPath(await file.text(), {
+          compositionWidth: project?.settings.width,
+          compositionHeight: project?.settings.height,
+        });
+
+        const mask = maskEngine.createDrawnMask(clipId, path);
+        setSelectedMaskId(mask.id);
+        setExpandedMasks((prev) => new Set([...prev, mask.id]));
+        triggerRefresh();
+
+        if (warnings.length > 0) {
+          toast.info("Imported with notes", warnings.join(" "));
+        } else {
+          toast.success("SVG imported", `${path.points.length} points, ready to edit.`);
+        }
+      } catch (error) {
+        toast.error(
+          "Could not import this SVG",
+          error instanceof SvgMaskImportError
+            ? error.message
+            : error instanceof Error
+              ? error.message
+              : "The file could not be read.",
+        );
+      }
+    },
+    [clipId, maskEngine, project, triggerRefresh],
+  );
+
   const handleToggleInvert = useCallback(
     (maskId: string) => {
       if (!maskEngine) return;
@@ -742,6 +787,30 @@ export const MaskSection: React.FC<MaskSectionProps> = ({ clipId }) => {
               Custom
             </Text>
           </ClickableCard>
+          <ClickableCard
+            label="Import a mask shape from an SVG file"
+            onClick={() => svgInputRef.current?.click()}
+            padding={2}
+            variant="muted"
+            className="flex flex-col items-center gap-1 border border-transparent bg-bg-2 hover:border-primary/30 hover:bg-primary/20"
+          >
+            <FileUp size={14} className="text-fg-2" />
+            <Text type="supporting" color="secondary" className="text-[8px]">
+              Import SVG
+            </Text>
+          </ClickableCard>
+          <input
+            ref={svgInputRef}
+            type="file"
+            accept=".svg,image/svg+xml"
+            className="hidden"
+            onChange={(event) => {
+              const file = event.target.files?.[0];
+              // Clear first, so picking the same file twice in a row still fires onChange.
+              event.target.value = "";
+              if (file) void handleImportSvg(file);
+            }}
+          />
           <ClickableCard
             label="Use another clip as a track matte"
             onClick={handleAddTrackMatte}

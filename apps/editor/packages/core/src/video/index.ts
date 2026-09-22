@@ -49,3 +49,6 @@ export * from "./adjustment-layer-engine";
 
 // Upscaling
 export * from "./upscaling";
+
+// SVG mask import
+export * from "./svg-mask-path.js";
