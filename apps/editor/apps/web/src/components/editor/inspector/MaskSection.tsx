@@ -29,7 +29,7 @@ import { ToolcraftText as Text } from "@openreel/ui";
 import { PropertySlider } from "./shell/PropertySlider";
 import { useEngineStore } from "../../../stores/engine-store";
 import { useProjectStore } from "../../../stores/project-store";
-import type { BezierPath, Mask, MaskShape } from "@openreel/core";
+import type { BezierPath, Mask, MaskEngine, MaskShape } from "@openreel/core";
 import {
   boundsPathFromTransform,
   parseSvgToMaskPath,
@@ -495,7 +495,9 @@ export const MaskSection: React.FC<MaskSectionProps> = ({ clipId }) => {
   const [pendingLibraryDelete, setPendingLibraryDelete] = useState<string | null>(null);
   const [selectedMaskId, setSelectedMaskId] = useState<string | null>(null);
   const [expandedMasks, setExpandedMasks] = useState<Set<string>>(new Set());
-  const [refreshKey, setRefreshKey] = useState(0);
+  // Only the setter is used: the list is derived from the project, and this just forces
+  // a re-render after a track matte's derived path changes in the engine.
+  const [, setRefreshKey] = useState(0);
   const [maskEngine, setMaskEngine] =
     useState<import("@openreel/core").MaskEngine | null>(null);
 
@@ -544,10 +546,72 @@ export const MaskSection: React.FC<MaskSectionProps> = ({ clipId }) => {
     };
   }, [getMaskEngine]);
 
-  const masks = useMemo(() => {
-    if (!maskEngine) return [];
-    return maskEngine.getMasksForClip(clipId);
-  }, [maskEngine, clipId, refreshKey]);
+  // The panel lists what the PROJECT holds. The shared engine is a scratch copy used to
+  // build the next save, and it has been stale in practice - empty just after a project
+  // opened, or holding only the clips the preview had drawn - so it is never the source.
+  const masks = useMemo(
+    () => (project.masks ?? []).filter((mask) => mask.clipId === clipId),
+    [project.masks, clipId],
+  );
+
+  /**
+   * Re-derives each track matte's path from its source clip's current transform, in the
+   * given engine. Returns whether anything changed.
+   *
+   * Preview and export render a track matte from its STORED path, so this derived path
+   * has to travel with the next save. Reading the live store (not a render-time closure)
+   * keeps that true when a save runs right after the source clip moved.
+   */
+  const deriveTrackMattePaths = useCallback(
+    (engine: MaskEngine): boolean => {
+      const current = useProjectStore.getState().project;
+      const trackMattes = engine
+        .getMasksForClip(clipId)
+        .filter((m) => m.type === "track-matte");
+      let didChange = false;
+      for (const mask of trackMattes) {
+        if (!mask.sourceClipId) continue;
+        // Find source clip's transform across regular and text clips.
+        let transform:
+          | { position: { x: number; y: number }; scale: { x: number; y: number } }
+          | null = null;
+        for (const track of current.timeline.tracks) {
+          const c = track.clips.find((cc) => cc.id === mask.sourceClipId);
+          if (c) {
+            transform = {
+              position: c.transform.position,
+              scale: c.transform.scale,
+            };
+            break;
+          }
+        }
+        if (!transform) {
+          try {
+            const texts = getAllTextClips();
+            const tc = texts.find((t) => t.id === mask.sourceClipId);
+            if (tc) {
+              transform = {
+                position: tc.transform.position,
+                scale: tc.transform.scale,
+              };
+            }
+          } catch {
+            /* ignore */
+          }
+        }
+        if (!transform) continue;
+        const nextPath = boundsPathFromTransform(transform);
+        const prev = mask.path;
+        // Cheap stringify-equality check — paths are tiny.
+        if (JSON.stringify(prev) !== JSON.stringify(nextPath)) {
+          engine.updateMaskPath(mask.id, nextPath);
+          didChange = true;
+        }
+      }
+      return didChange;
+    },
+    [clipId, getAllTextClips],
+  );
 
   // Keep track-matte mask paths in sync with their source clip's
   // transform. We re-derive the path whenever the project changes —
@@ -555,55 +619,30 @@ export const MaskSection: React.FC<MaskSectionProps> = ({ clipId }) => {
   // a deeper render-pipeline integration that's tracked separately.
   useEffect(() => {
     if (!maskEngine) return;
-    const trackMattes = masks.filter((m) => m.type === "track-matte");
-    if (trackMattes.length === 0) return;
-    let didChange = false;
-    for (const mask of trackMattes) {
-      if (!mask.sourceClipId) continue;
-      // Find source clip's transform across regular and text clips.
-      let transform:
-        | { position: { x: number; y: number }; scale: { x: number; y: number } }
-        | null = null;
-      for (const track of project.timeline.tracks) {
-        const c = track.clips.find((cc) => cc.id === mask.sourceClipId);
-        if (c) {
-          transform = {
-            position: c.transform.position,
-            scale: c.transform.scale,
-          };
-          break;
-        }
-      }
-      if (!transform) {
-        try {
-          const texts = getAllTextClips();
-          const tc = texts.find((t) => t.id === mask.sourceClipId);
-          if (tc) {
-            transform = {
-              position: tc.transform.position,
-              scale: tc.transform.scale,
-            };
-          }
-        } catch {
-          /* ignore */
-        }
-      }
-      if (!transform) continue;
-      const nextPath = boundsPathFromTransform(transform);
-      const prev = mask.path;
-      // Cheap stringify-equality check — paths are tiny.
-      if (JSON.stringify(prev) !== JSON.stringify(nextPath)) {
-        maskEngine.updateMaskPath(mask.id, nextPath);
-        didChange = true;
-      }
-    }
-    if (didChange) {
+    if (deriveTrackMattePaths(maskEngine)) {
       // Don't tick the project modifiedAt here — this is a derived
       // refresh, not a user edit. We only bump refreshKey locally so
       // the inspector re-renders.
       setRefreshKey((k) => k + 1);
     }
-  }, [maskEngine, masks, project, getAllTextClips]);
+  }, [maskEngine, masks, project, deriveTrackMattePaths]);
+
+  /**
+   * The shared engine, reloaded from the project's current masks, ready to mutate.
+   *
+   * Every change goes through this, immediately before it is made. The panel saves by
+   * writing the engine's whole contents back (see triggerRefresh), so an engine holding
+   * anything other than the open project's masks turns one click into deleted masks -
+   * which is what happened when it was empty just after a project opened, or held only
+   * the clips the preview had drawn. Reloading first makes the save exactly "the project,
+   * plus this change", whatever state the engine was left in.
+   */
+  const syncedEngine = useCallback((): MaskEngine | null => {
+    if (!maskEngine) return null;
+    maskEngine.loadMasks(useProjectStore.getState().project.masks ?? []);
+    deriveTrackMattePaths(maskEngine);
+    return maskEngine;
+  }, [maskEngine, deriveTrackMattePaths]);
 
   const triggerRefresh = useCallback(() => {
     setRefreshKey((k) => k + 1);
@@ -619,7 +658,8 @@ export const MaskSection: React.FC<MaskSectionProps> = ({ clipId }) => {
 
   const handleAddShapeMask = useCallback(
     (shapeType: MaskShapeType) => {
-      if (!maskEngine) return;
+      const maskEngine = syncedEngine();
+    if (!maskEngine) return;
 
       const shapes: Record<MaskShapeType, MaskShape> = {
         rectangle: {
@@ -646,12 +686,13 @@ export const MaskSection: React.FC<MaskSectionProps> = ({ clipId }) => {
       setExpandedMasks((prev) => new Set([...prev, mask.id]));
       triggerRefresh();
     },
-    [maskEngine, clipId, triggerRefresh],
+    [syncedEngine, clipId, triggerRefresh],
   );
 
   const handleDeleteMask = useCallback(
     (maskId: string) => {
-      if (!maskEngine) return;
+      const maskEngine = syncedEngine();
+    if (!maskEngine) return;
       maskEngine.deleteMask(maskId);
       if (selectedMaskId === maskId) {
         setSelectedMaskId(null);
@@ -663,58 +704,65 @@ export const MaskSection: React.FC<MaskSectionProps> = ({ clipId }) => {
       });
       triggerRefresh();
     },
-    [maskEngine, selectedMaskId, triggerRefresh],
+    [syncedEngine, selectedMaskId, triggerRefresh],
   );
 
   const handleDuplicateMask = useCallback(
     (mask: Mask) => {
-      if (!maskEngine) return;
+      const maskEngine = syncedEngine();
+    if (!maskEngine) return;
       const newMask = maskEngine.duplicateMask(mask.id, clipId);
       if (!newMask) return;
       setSelectedMaskId(newMask.id);
       setExpandedMasks((prev) => new Set([...prev, newMask.id]));
       triggerRefresh();
     },
-    [maskEngine, clipId, triggerRefresh],
+    [syncedEngine, clipId, triggerRefresh],
   );
 
   const handleUpdateFeathering = useCallback(
     (maskId: string, value: number) => {
-      if (!maskEngine) return;
+      const maskEngine = syncedEngine();
+    if (!maskEngine) return;
       maskEngine.setFeathering(maskId, value);
       triggerRefresh();
     },
-    [maskEngine, triggerRefresh],
+    [syncedEngine, triggerRefresh],
   );
 
   const handleUpdateExpansion = useCallback(
     (maskId: string, value: number) => {
-      if (!maskEngine) return;
+      const maskEngine = syncedEngine();
+    if (!maskEngine) return;
       maskEngine.setExpansion(maskId, value);
       triggerRefresh();
     },
-    [maskEngine, triggerRefresh],
+    [syncedEngine, triggerRefresh],
   );
 
   const handleUpdateOpacity = useCallback(
     (maskId: string, value: number) => {
-      if (!maskEngine) return;
+      const maskEngine = syncedEngine();
+    if (!maskEngine) return;
       maskEngine.setOpacity(maskId, value);
       triggerRefresh();
     },
-    [maskEngine, triggerRefresh],
+    [syncedEngine, triggerRefresh],
   );
 
   const handleUpdatePath = useCallback(
     (maskId: string, path: BezierPath) => {
-      if (!maskEngine || path.points.length < 3) return;
+      if (path.points.length < 3) return;
+      const maskEngine = syncedEngine();
+      if (!maskEngine) return;
       maskEngine.updateMaskPath(maskId, path);
       triggerRefresh();
     },
-    [maskEngine, triggerRefresh],
+    [syncedEngine, triggerRefresh],
   );
 
   const handleAddDrawnMask = useCallback(() => {
+    const maskEngine = syncedEngine();
     if (!maskEngine) return;
     const mask = maskEngine.createDrawnMask(clipId, {
       closed: true,
@@ -730,7 +778,7 @@ export const MaskSection: React.FC<MaskSectionProps> = ({ clipId }) => {
     setSelectedMaskId(mask.id);
     setExpandedMasks((prev) => new Set([...prev, mask.id]));
     triggerRefresh();
-  }, [clipId, maskEngine, triggerRefresh]);
+  }, [clipId, syncedEngine, triggerRefresh]);
 
   /**
    * Imports a single-path SVG as an ordinary drawn mask.
@@ -742,7 +790,8 @@ export const MaskSection: React.FC<MaskSectionProps> = ({ clipId }) => {
    */
   const handleImportSvg = useCallback(
     async (file: File) => {
-      if (!maskEngine) return;
+      const maskEngine = syncedEngine();
+    if (!maskEngine) return;
 
       try {
         const { path, warnings } = parseSvgToMaskPath(await file.text(), {
@@ -750,7 +799,9 @@ export const MaskSection: React.FC<MaskSectionProps> = ({ clipId }) => {
           compositionHeight: project?.settings.height,
         });
 
-        const mask = maskEngine.createDrawnMask(clipId, path);
+        const engine = syncedEngine();
+        if (!engine) return;
+        const mask = engine.createDrawnMask(clipId, path);
         setSelectedMaskId(mask.id);
         setExpandedMasks((prev) => new Set([...prev, mask.id]));
         triggerRefresh();
@@ -771,7 +822,7 @@ export const MaskSection: React.FC<MaskSectionProps> = ({ clipId }) => {
         );
       }
     },
-    [clipId, maskEngine, project, triggerRefresh],
+    [clipId, syncedEngine, project, triggerRefresh],
   );
 
   const refreshLibrary = useCallback(async () => {
@@ -830,7 +881,8 @@ export const MaskSection: React.FC<MaskSectionProps> = ({ clipId }) => {
    */
   const handleApplySavedMask = useCallback(
     async (entry: SavedMaskSummary) => {
-      if (!maskEngine || !project) return;
+      // The engine comes from syncedEngine() right before the mutation, below.
+      if (!project) return;
       try {
         const saved = await getSavedMask(entry.id);
         const from =
@@ -841,7 +893,9 @@ export const MaskSection: React.FC<MaskSectionProps> = ({ clipId }) => {
           width: project.settings.width,
           height: project.settings.height,
         });
-        const mask = maskEngine.createDrawnMask(clipId, path);
+        const engine = syncedEngine();
+        if (!engine) return;
+        const mask = engine.createDrawnMask(clipId, path);
         setSelectedMaskId(mask.id);
         setExpandedMasks((prev) => new Set([...prev, mask.id]));
         triggerRefresh();
@@ -853,7 +907,7 @@ export const MaskSection: React.FC<MaskSectionProps> = ({ clipId }) => {
         );
       }
     },
-    [clipId, maskEngine, project, triggerRefresh],
+    [clipId, syncedEngine, project, triggerRefresh],
   );
 
   const handleDeleteSavedMask = useCallback(
@@ -881,17 +935,19 @@ export const MaskSection: React.FC<MaskSectionProps> = ({ clipId }) => {
 
   const handleToggleInvert = useCallback(
     (maskId: string) => {
-      if (!maskEngine) return;
+      const maskEngine = syncedEngine();
+    if (!maskEngine) return;
       const mask = maskEngine.getMask(maskId);
       if (mask) {
         maskEngine.setInverted(maskId, !mask.inverted);
         triggerRefresh();
       }
     },
-    [maskEngine, triggerRefresh],
+    [syncedEngine, triggerRefresh],
   );
 
   const handleAddTrackMatte = useCallback(() => {
+    const maskEngine = syncedEngine();
     if (!maskEngine) return;
     // Default to the first available source clip that isn't ourselves.
     const firstAvailable = matteSourceOptions.find((o) => o.id !== clipId);
@@ -903,7 +959,7 @@ export const MaskSection: React.FC<MaskSectionProps> = ({ clipId }) => {
     setSelectedMaskId(mask.id);
     setExpandedMasks((prev) => new Set([...prev, mask.id]));
     triggerRefresh();
-  }, [maskEngine, clipId, matteSourceOptions, triggerRefresh]);
+  }, [syncedEngine, clipId, matteSourceOptions, triggerRefresh]);
 
   const handleSetMatteSource = useCallback(
     (
@@ -911,11 +967,12 @@ export const MaskSection: React.FC<MaskSectionProps> = ({ clipId }) => {
       sourceClipId: string,
       matteSource: "alpha" | "luminance" | "bounds",
     ) => {
-      if (!maskEngine) return;
+      const maskEngine = syncedEngine();
+    if (!maskEngine) return;
       maskEngine.setMatteSource(maskId, sourceClipId, matteSource);
       triggerRefresh();
     },
-    [maskEngine, triggerRefresh],
+    [syncedEngine, triggerRefresh],
   );
 
   const toggleMaskExpanded = (maskId: string) => {
@@ -931,6 +988,7 @@ export const MaskSection: React.FC<MaskSectionProps> = ({ clipId }) => {
   };
 
   const handleResetMasks = useCallback(() => {
+    const maskEngine = syncedEngine();
     if (!maskEngine) return;
     for (const mask of masks) {
       maskEngine.deleteMask(mask.id);
@@ -938,7 +996,7 @@ export const MaskSection: React.FC<MaskSectionProps> = ({ clipId }) => {
     setSelectedMaskId(null);
     setExpandedMasks(new Set());
     triggerRefresh();
-  }, [maskEngine, masks, triggerRefresh]);
+  }, [syncedEngine, masks, triggerRefresh]);
 
   return (
     <div className="space-y-3">

@@ -259,12 +259,9 @@ export function createProjectStoreHelpers(
         });
     }
     getAdjustmentLayerEngine().loadLayers(project.adjustmentLayers ?? []);
-    if (project.masks) {
-      void useEngineStore
-        .getState()
-        .getMaskEngine()
-        .then((engine) => engine.loadMasks(project.masks ?? []));
-    }
+    // Unconditional: skipping this when `masks` is absent left the previous masks in
+    // the engine, and the Mask panel would then save them into this project.
+    useEngineStore.getState().getMaskEngineSync().loadMasks(project.masks ?? []);
     if (project.multicamGroups) {
       multicamEngine.loadGroups(project.multicamGroups);
     }

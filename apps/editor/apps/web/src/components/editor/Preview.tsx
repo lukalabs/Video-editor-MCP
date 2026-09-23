@@ -95,6 +95,7 @@ import {
   previewQualityScale,
   PREVIEW_QUALITY_OPTIONS,
 } from "./preview/index";
+import { getPreviewMaskEngine } from "./preview/preview-mask-engine";
 import { snapCanvasPosition } from "./preview/canvas-snapping";
 import { captureNativeVideoFrame } from "./preview/video-frame";
 import { ProcessingOverlay } from "./ProcessingOverlay";
@@ -1228,7 +1229,6 @@ export const Preview: React.FC = () => {
     project.svgClips,
   ]);
 
-  const getMaskEngine = useEngineStore((state) => state.getMaskEngine);
   const clipMasksById = useMemo(() => {
     const byClip = new Map<string, Mask[]>();
     for (const mask of project.masks ?? []) {
@@ -1263,7 +1263,9 @@ export const Preview: React.FC = () => {
       }
 
       try {
-        const maskEngine = await getMaskEngine();
+        // Its own engine, never the shared one the Mask panel edits - see
+        // preview-mask-engine.ts for what sharing it cost.
+        const maskEngine = await getPreviewMaskEngine();
         await drawFrameWithMasks({
           ctx,
           frame,
@@ -1287,7 +1289,7 @@ export const Preview: React.FC = () => {
         );
       }
     },
-    [clipMasksById, getMaskEngine],
+    [clipMasksById],
   );
 
   // Get subtitles from project timeline

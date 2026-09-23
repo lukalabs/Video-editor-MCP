@@ -39,6 +39,24 @@ async function getOrCreateEngine<T>(
   return lazyEngineCache.get(key) as Promise<T>;
 }
 
+/**
+ * Instances of engines whose factory is synchronous, for callers that must use them in
+ * the same tick - see getMaskEngineSync. Always kept in step with lazyEngineCache, so the
+ * sync and async getters hand out one and the same instance.
+ */
+const lazyEngineInstances = new Map<string, unknown>();
+
+function getOrCreateEngineNow<T>(key: string, factory: () => T): T {
+  if (!lazyEngineInstances.has(key)) {
+    const instance = factory();
+    lazyEngineInstances.set(key, instance);
+    lazyEngineCache.set(key, Promise.resolve(instance));
+  }
+  return lazyEngineInstances.get(key) as T;
+}
+
+const createMaskEngine = () => new MaskEngine({ width: 1920, height: 1080 });
+
 export interface AudioLevelData {
   peaks: Map<string, number>;
   rms: Map<string, number>;
@@ -104,6 +122,12 @@ export interface EngineState {
   getChromaKeyEngine: () => Promise<ChromaKeyEngine>;
   getMultiCamEngine: () => Promise<MultiCamEngine>;
   getMaskEngine: () => Promise<MaskEngine>;
+  /**
+   * The same shared mask engine, synchronously. Opening a project loads its masks through
+   * this in the same call that puts the project in the store, so there is never a moment
+   * where the project is showing and the engine still holds nothing - or the last one's.
+   */
+  getMaskEngineSync: () => MaskEngine;
   getNestedSequenceEngine: () => Promise<NestedSequenceEngine>;
   getAdjustmentLayerEngine: () => Promise<AdjustmentLayerEngine>;
 }
@@ -276,6 +300,7 @@ export const useEngineStore = create<EngineState>()(
       }
 
       lazyEngineCache.clear();
+      lazyEngineInstances.clear();
 
       set({
         initialized: false,
@@ -390,11 +415,8 @@ export const useEngineStore = create<EngineState>()(
       ),
     getMultiCamEngine: () =>
       getOrCreateEngine("multiCam", () => new MultiCamEngine()),
-    getMaskEngine: () =>
-      getOrCreateEngine(
-        "mask",
-        () => new MaskEngine({ width: 1920, height: 1080 })
-      ),
+    getMaskEngine: () => Promise.resolve(getOrCreateEngineNow("mask", createMaskEngine)),
+    getMaskEngineSync: () => getOrCreateEngineNow("mask", createMaskEngine),
     getNestedSequenceEngine: () =>
       getOrCreateEngine("nestedSequence", () => new NestedSequenceEngine()),
     getAdjustmentLayerEngine: () =>

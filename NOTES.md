@@ -59,21 +59,15 @@ Standing rules that apply to future work, kept here so they survive between sess
 
 Known, deliberate, not yet done. Recorded so they are not rediscovered from scratch.
 
-- **Mask panel can destroy or leak masks (pre-existing, from the OpenReel fork).**
-  Mask actions write the shared `MaskEngine` back to the project wholesale
-  (`mask/setAll` from `getAllMasks()`), but the engine lags `project.masks`:
-  (1) for ~0.5s after a project opens the store shows it while the engine is still
-  empty, and a mask action in that window replaces the project's masks — reproduced
-  with both Import SVG and the original Rectangle button; (2) `store-helpers.ts`
-  only reloads the engine `if (project.masks)`, so opening a project with no masks
-  field keeps the previous project's masks, which the next mask action writes into
-  the new project (reproduced: A's mask saved into B, as an orphan that does not
-  render); (3) unverified: `masked-frame-renderer.ts` calls `loadMasks` with one
-  clip's masks on the same shared engine on every preview draw, which in a
-  multi-clip project may drop other clips' masks on the next panel action. Fix
-  direction: build `mask/setAll` from `project.masks` rather than the engine, reload
-  unconditionally on project load, and give the preview renderer its own engine.
-  Core-engine change — plan before building.
+- **Track-matte "bounds" mode puts the matte in the wrong place (pre-existing, from the
+  OpenReel fork).** `boundsPathFromTransform` (core, `video/mask-engine.ts`) reads the
+  source clip's `transform.position` as the matte's normalized centre (0..1), but clip
+  positions are pixel offsets from the frame centre. A centred source at 50% therefore
+  derives x/y -0.25..0.25 - a box around the top-left corner - where 0.25..0.75 was meant
+  (measured in the live app, 2026-09-23). It rarely shows because the derived path is only
+  saved by a mask action on the matte's own clip; until then the stored default
+  (0.25..0.75) renders. Fix is a coordinate conversion using the project size, plus the
+  source's aspect. Core-engine change - plan before building.
 - **Two live, disconnected caption representations.** The editor writes captions as text
   clips on a "Captions" track (Whisper, SRT import, the Caption Animation inspector,
   `exportSRT`). project-kit's subtitle ops write `timeline.subtitles`, painted by
@@ -4029,4 +4023,60 @@ frames of fresh exports matched the pre-delete exports.
 
 The Mask panel saves by writing the shared `MaskEngine`'s whole contents back to
 the project (`mask/setAll` from `getAllMasks()`), but that engine is a late,
-lossy mirror of `project.masks`. See Open items.
+lossy mirror of `project.masks`. Fixed in Stage 31.
+
+## Stage 31 — Mask panel data loss fixed
+
+### What was wrong
+
+One flaw, three symptoms. The Mask panel treated the shared `MaskEngine` as the source
+of truth: it listed masks from it and saved by writing its whole contents back
+(`mask/setAll` from `getAllMasks()`). Nothing kept that engine in step with
+`project.masks`:
+
+1. **Nothing loaded masks on open.** `loadProject` loaded the title and graphics engines
+   and never touched the mask engine. It filled only when the preview drew a masked clip
+   (~500ms, waiting on media decode), so a mask action in that window replaced the
+   project's masks. Not a missing await - there was no load step at all; the engine's
+   factory is synchronous.
+2. **Nothing reset it on switch**, so the previous project's masks were saved into the
+   next project (as orphans pointing at clips it does not have). The `if (project.masks)`
+   guard in `syncOverlayEnginesFromProject` was a second hole on undo/redo.
+3. **The preview overwrote it per clip.** Each masked draw replaced the engine's contents
+   with that clip's masks, so it only held the clips under the playhead, and adding a mask
+   to one clip deleted every other clip's masks - deterministic, no timing involved.
+   Confirmed with two clips back to back: store 2 masks, engine 1, one Rectangle later the
+   other clip's star was gone from the server.
+
+Export was never affected - `VideoEngine` owns a private `MaskEngine` fed from
+`project.masks` - but it faithfully rendered the damaged data the panel had stored.
+
+### Fix
+
+- `loadProject` loads `project.masks ?? []` into the engine synchronously, in the same
+  call that puts the project in the store (new `getMaskEngineSync`; the sync and async
+  getters share one instance). Empty load for a project without the field.
+- `syncOverlayEnginesFromProject` reloads unconditionally, synchronously.
+- The preview draws with its own `MaskEngine` (`preview/preview-mask-engine.ts`).
+- Backstop in `MaskSection`: the list is derived from `project.masks`, and every mutation
+  starts from `syncedEngine()` - the engine reloaded from the store's current masks - so a
+  save is exactly "the project plus this change" whatever state the engine was in. The two
+  async handlers (Import SVG, From library) re-sync after their await, right before
+  mutating. Safe for successive edits because `executeAction` commits within microtasks,
+  before the next user event.
+- `syncedEngine()` re-derives track-matte paths for the clip being edited, preserving the
+  old behaviour that a derived path is saved by an action on the matte's own clip. Not
+  widened to all mattes on purpose: the derivation itself is wrong (see Open items), and
+  widening would spread the wrong path on every save.
+
+### Verified
+
+Four tests written first and failing on the old code for the right reason (one initially
+passed vacuously - the old engine was empty both before and after - and was fixed to seed
+the previous project's masks). In the live app: acting the instant a project opened kept
+both clips' masks (engine held them the moment the project appeared); opening a
+project-kit project after a masked one took the engine from 4 masks to 0 and the new mask
+landed alone on its own clip; with the playhead on one clip for 5s the shared engine still
+held every clip's masks and a new mask kept the other clip's star. Regression: Rectangle,
+Ellipse, Polygon, Custom, Track Matte and a library-applied ellipse on six clips, 28/28
+sampled points correct in preview and 28/28 in export.

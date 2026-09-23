@@ -1803,6 +1803,12 @@ export const useProjectStore = create<ProjectState>()(
           graphicsEngine.loadSVGClips(project.svgClips ?? []);
           graphicsEngine.loadStickerClips(project.stickerClips ?? []);
         }
+        // Always, and synchronously - including an empty load for a project with no masks
+        // field. This used to happen nowhere on open: the engine only filled when the
+        // preview drew a masked clip, so for about half a second a mask action saved an
+        // empty list over the project's masks, and a project without masks inherited the
+        // previous project's.
+        useEngineStore.getState().getMaskEngineSync().loadMasks(project.masks ?? []);
 
         const newHistory = new ActionHistory();
         const newExecutor = new ActionExecutor(newHistory);
