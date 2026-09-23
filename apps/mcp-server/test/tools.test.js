@@ -70,6 +70,8 @@ const EXPECTED_TOOLS = [
   "export_project",
   "render_preview_frame",
   "service_health",
+  "list_saved_masks",
+  "save_mask",
 ];
 
 let client;
@@ -122,6 +124,7 @@ test("tools that create or mutate declare their required parameters", () => {
     load_project: ["projectId"],
     apply_project_ops: ["projectId", "ops"],
     export_project: ["projectId"],
+    save_mask: ["name"],
   };
   for (const [name, keys] of Object.entries(required)) {
     const tool = tools.find((item) => item.name === name);
@@ -206,4 +209,16 @@ test("every component id a description names is a live component", () => {
       }
     }
   }
+});
+
+test("the saved-mask tools explain copy-on-apply and how to apply by name", () => {
+  const ops = tools.find((item) => item.name === "apply_project_ops");
+  const save = tools.find((item) => item.name === "save_mask");
+  const list = tools.find((item) => item.name === "list_saved_masks");
+
+  assert.match(ops.description, /savedMaskName/);
+  // The property an agent most needs to trust before deleting an entry.
+  assert.match(ops.description, /COPIED onto the clip/);
+  assert.match(save.description, /never affects clips/);
+  assert.match(list.description, /set_clip_mask \{ savedMaskName \}/);
 });

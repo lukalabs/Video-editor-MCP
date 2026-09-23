@@ -39,6 +39,11 @@ export interface SvgMaskParseResult {
   path: BezierPath;
   /** Non-fatal notes worth showing, e.g. a missing viewBox. */
   warnings: string[];
+  /**
+   * The SVG user-space box the path was mapped from (viewBox, width/height, or the
+   * path's own bounds). With no composition given, the path is normalized to this box.
+   */
+  box: { x: number; y: number; width: number; height: number };
 }
 
 /**

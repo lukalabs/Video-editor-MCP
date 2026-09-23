@@ -364,7 +364,7 @@ function boundingBox(anchors) {
  *   The composition's pixel dimensions. Supplying them keeps the shape's proportions: the
  *   artwork is fitted (letterboxed) inside the frame and centred, so a circle stays a
  *   circle in a 9:16 project. Without them the SVG box is stretched onto the unit square.
- * @returns {{ path: { points: any[], closed: boolean }, warnings: string[] }}
+ * @returns {{ path: { points: any[], closed: boolean }, warnings: string[], box: { x: number, y: number, width: number, height: number } }}
  */
 export function parseSvgToMaskPath(svg, options = {}) {
   if (typeof svg !== "string" || svg.trim() === "") {
@@ -476,5 +476,11 @@ export function parseSvgToMaskPath(svg, options = {}) {
 
   // The mask renderer always closes the outline, so an unclosed path would render as a
   // filled shape anyway - recording it as closed keeps the stored data honest.
-  return { path: { points, closed: true }, warnings };
+  // `box` is the user-space rectangle the path was mapped from. Callers that save the
+  // shape without a composition use it as the frame the mask was made in.
+  return {
+    path: { points, closed: true },
+    warnings,
+    box: { x: box.x, y: box.y, width: box.width, height: box.height },
+  };
 }

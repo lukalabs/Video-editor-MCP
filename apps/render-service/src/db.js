@@ -67,7 +67,21 @@ export function getDb() {
       label       TEXT
     );
 
+    CREATE TABLE IF NOT EXISTS saved_masks (
+      id            TEXT PRIMARY KEY,
+      name          TEXT NOT NULL,
+      path_data     TEXT NOT NULL,
+      source_width  REAL,
+      source_height REAL,
+      source_svg    TEXT,
+      created_at    INTEGER NOT NULL
+    );
+
     CREATE INDEX IF NOT EXISTS idx_projects_updated ON projects(updated_at DESC);
+    -- Names are how people and agents pick a mask, so two that differ only in case would
+    -- make savedMaskName ambiguous.
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_saved_masks_name
+      ON saved_masks(name COLLATE NOCASE);
     CREATE INDEX IF NOT EXISTS idx_versions_project
       ON project_versions(project_id, created_at DESC);
   `);
@@ -387,6 +401,83 @@ export function listComponentMetadata() {
     .map(rowToComponentMetadata);
 }
 
+
+/* -------------------------------------------------------------- saved masks */
+
+/**
+ * A library of named mask shapes, reusable on any clip in any project.
+ *
+ * Stores the normalized path - the same form a clip's mask persists in - plus the size of
+ * the frame it was made in, because normalized coordinates only mean the same shape in a
+ * frame of the same proportions (see refitMaskPath). The original SVG is kept when there
+ * was one, for provenance only; nothing reads it back to apply a mask.
+ *
+ * Entries belong to no project and reference no media, so deleting a project leaves them
+ * alone and the media sweep never looks at them. Applying one COPIES its path onto the
+ * clip; clips never point back here, so deleting an entry cannot change them.
+ */
+
+/** Raised when a name is already taken, ignoring case. */
+export class SavedMaskNameTakenError extends Error {
+  constructor(name) {
+    super(`A saved mask named "${name}" already exists`);
+    this.name = "SavedMaskNameTakenError";
+  }
+}
+
+function rowToSavedMask(row, { withSource = true } = {}) {
+  const path = JSON.parse(row.path_data);
+  const out = {
+    id: row.id,
+    name: row.name,
+    path,
+    pointCount: path.points?.length ?? 0,
+    sourceWidth: row.source_width,
+    sourceHeight: row.source_height,
+    createdAt: row.created_at,
+  };
+  // The original SVG can be large and nothing in a listing needs it.
+  if (withSource) out.sourceSvg = row.source_svg;
+  return out;
+}
+
+export function createSavedMask({ id, name, path, sourceWidth, sourceHeight, sourceSvg }) {
+  const now = Date.now();
+  const handle = getDb();
+  if (handle.prepare("SELECT 1 FROM saved_masks WHERE name = ? COLLATE NOCASE").get(name)) {
+    throw new SavedMaskNameTakenError(name);
+  }
+  handle
+    .prepare(
+      `INSERT INTO saved_masks (id, name, path_data, source_width, source_height, source_svg, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    )
+    .run(id, name, JSON.stringify(path), sourceWidth ?? null, sourceHeight ?? null, sourceSvg ?? null, now);
+  return getSavedMask(id);
+}
+
+export function listSavedMasks() {
+  return getDb()
+    .prepare("SELECT * FROM saved_masks ORDER BY created_at DESC")
+    .all()
+    .map((row) => rowToSavedMask(row, { withSource: false }));
+}
+
+export function getSavedMask(id) {
+  const row = getDb().prepare("SELECT * FROM saved_masks WHERE id = ?").get(id);
+  return row ? rowToSavedMask(row) : null;
+}
+
+export function getSavedMaskByName(name) {
+  const row = getDb()
+    .prepare("SELECT * FROM saved_masks WHERE name = ? COLLATE NOCASE")
+    .get(name);
+  return row ? rowToSavedMask(row) : null;
+}
+
+export function deleteSavedMask(id) {
+  return getDb().prepare("DELETE FROM saved_masks WHERE id = ?").run(id).changes > 0;
+}
 
 /* --------------------------------------------------------- project versions */
 

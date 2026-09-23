@@ -59,6 +59,21 @@ Standing rules that apply to future work, kept here so they survive between sess
 
 Known, deliberate, not yet done. Recorded so they are not rediscovered from scratch.
 
+- **Mask panel can destroy or leak masks (pre-existing, from the OpenReel fork).**
+  Mask actions write the shared `MaskEngine` back to the project wholesale
+  (`mask/setAll` from `getAllMasks()`), but the engine lags `project.masks`:
+  (1) for ~0.5s after a project opens the store shows it while the engine is still
+  empty, and a mask action in that window replaces the project's masks — reproduced
+  with both Import SVG and the original Rectangle button; (2) `store-helpers.ts`
+  only reloads the engine `if (project.masks)`, so opening a project with no masks
+  field keeps the previous project's masks, which the next mask action writes into
+  the new project (reproduced: A's mask saved into B, as an orphan that does not
+  render); (3) unverified: `masked-frame-renderer.ts` calls `loadMasks` with one
+  clip's masks on the same shared engine on every preview draw, which in a
+  multi-clip project may drop other clips' masks on the next panel action. Fix
+  direction: build `mask/setAll` from `project.masks` rather than the engine, reload
+  unconditionally on project load, and give the preview renderer its own engine.
+  Core-engine change — plan before building.
 - **Two live, disconnected caption representations.** The editor writes captions as text
   clips on a "Captions" track (Whisper, SRT import, the Caption Animation inspector,
   `exportSRT`). project-kit's subtitle ops write `timeline.subtitles`, painted by
@@ -3922,3 +3937,96 @@ radius 486/487 px in all four directions against a predicted 486.
 
 Restarting the render-service is what loads a new op into `/projects/:id/ops`;
 the module list is read at import.
+
+## Stage 30 — saved-mask library
+
+### Why
+
+A logo or silhouette imported as a mask lived on one clip. Using it again meant
+finding the SVG and importing it again, per clip, per project — and an agent had
+no way to know a shape already existed.
+
+### Saving is explicit
+
+Nothing enters the library unless someone presses **Save as reusable mask** (the
+bookmark on a mask in the Mask panel) or calls `save_mask`. Importing an SVG for
+one clip stays one clip's. Track mattes cannot be saved — their stored path is a
+full-frame placeholder and the real shape comes from another clip at render
+time. An animated mask saves its current shape only, and says so.
+
+### Stored: the normalized path, plus the frame it was made in
+
+`saved_masks` holds the same normalized `BezierPath` a clip's mask persists, not
+the SVG (kept as `source_svg` for provenance only; nothing reads it to apply).
+
+It also holds `source_width` / `source_height`, and that is the part that
+mattered. Mask coordinates are normalized **to the frame**, so they only mean the
+same shape in a frame of the same proportions: a circle made in 1080x1920 is
+stored as 1.0 wide and 0.5625 tall, and read back in 1920x1080 it would be a flat
+ellipse. `refitMaskPath` (core, `video/mask-library.js`) fits the source frame
+inside the target — uniform scale, centred, the same fit an SVG viewBox gets on
+import — so a shape keeps its proportions and its place in the frame. Same
+proportions in and out is the identity. An SVG saved directly (no project) uses
+its own viewBox as its frame, which makes applying it later exactly the fit the
+importer would have done. The parser now returns that `box` for this.
+
+Plain JavaScript in core again, for the same reason as the parser: the
+render-service must re-fit identically to the editor, or one library entry would
+land in different places depending on whether a person or an agent applied it.
+
+### Applying copies; nothing links back
+
+Verified in code before building: a clip's mask is a complete object in
+`project.masks`, preview and export read only `mask.path`, no `Mask` field points
+anywhere else, and `MaskEngine` replaces paths rather than editing them in place.
+So applying an entry copies its re-fitted path onto the clip and records no
+library id — deleting an entry cannot reach a clip that already has it. One
+defensive detail: `createDrawnMask` keeps the object it is handed, so
+`refitMaskPath` always returns a fresh copy, even when nothing moves.
+
+### `save_mask` is a tool, not a project-kit op
+
+project-kit turns one project into another with no I/O, and that purity is what
+makes an ops batch all-or-nothing. A library row written from inside a batch
+would split one operation across two stores: a later op failing would discard
+the project change but keep the row. So `save_mask` is its own MCP tool over
+`POST /masks`, and `set_clip_mask { savedMaskName | savedMaskId }` is resolved
+by the **ops route** (`resolveSavedMaskRefs`) into plain re-fitted `points`
+before project-kit sees the batch. A failed lookup throws before anything is
+applied. The CLI and the orchestrator get library support for free this way.
+
+project-kit's `points` now accepts two anchors joined by a curve, matching the
+parser, so a saved lens shape is applicable.
+
+### Names
+
+Unique ignoring case (a `COLLATE NOCASE` unique index), so `savedMaskName` is
+never ambiguous. No rename — delete and save again — and unique names make adding
+one later trivial. Entries belong to no project and reference no media: deleting
+a project leaves them alone and the media sweep never looks at them.
+
+### API
+
+`POST /masks` (from `path` + source frame, `svg`, or `projectId` + `clipId`
+[+ `maskId`]), `GET /masks` (summaries with a `previewPath` outline for
+thumbnails, drawn with `viewBox="0 0 sourceWidth sourceHeight"`; no image files
+are generated), `GET /masks/:id`, `DELETE /masks/:id`. MCP: `list_saved_masks`,
+`save_mask` (also takes `svgPath`), and `set_clip_mask`'s two new sources.
+
+### Verified
+
+A circle imported in a 1080x1920 project and saved from the UI, then applied
+from the library to a clip in a 1920x1080 project: preview and export both
+measure radius 273/274 px in all four directions against a predicted 273.4, a
+546x546 lit box centred on the frame. Without the re-fit the horizontal radius
+would have been 864. Applied instead by an agent (`set_clip_mask
+{ savedMaskName: "verify circle" }`, different case) it measures identically.
+After deleting the entry, the stored masks of both projects were byte-identical,
+the preview after a full reload was unchanged, and every one of the 120 decoded
+frames of fresh exports matched the pre-delete exports.
+
+### Found along the way (pre-existing, not fixed here)
+
+The Mask panel saves by writing the shared `MaskEngine`'s whole contents back to
+the project (`mask/setAll` from `getAllMasks()`), but that engine is a late,
+lossy mirror of `project.masks`. See Open items.

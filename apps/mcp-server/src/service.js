@@ -78,6 +78,9 @@ export const service = {
   startExport: (id, body) => request("POST", `/projects/${encodeURIComponent(id)}/export`, { body }),
   exportStatus: (jobId) => request("GET", `/export/${encodeURIComponent(jobId)}`),
   startFrame: (id, body) => request("POST", `/projects/${encodeURIComponent(id)}/frame`, { body }),
+  listSavedMasks: () => request("GET", "/masks"),
+  saveMask: (body) => request("POST", "/masks", { body }),
+  deleteSavedMask: (id) => request("DELETE", `/masks/${encodeURIComponent(id)}`),
 
   /** Uploads a local file's bytes. Returns { id, filename, size, url }. */
   async uploadMedia({ filePath, mediaId, mimeType }) {

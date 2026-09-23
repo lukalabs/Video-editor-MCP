@@ -756,10 +756,17 @@ export function setClipMask(
       throw error;
     }
   } else {
-    if (!Array.isArray(points) || points.length < 3) {
+    if (!Array.isArray(points) || points.length < 2) {
       fail("INVALID_PARAMS", "points must be an array of at least 3 {x, y} objects");
     }
-    path = { points: points.map(normalizeMaskPoint), closed: true };
+    const normalized = points.map(normalizeMaskPoint);
+    // Two anchors joined by a curve still enclose an area (the renderer wraps around), the
+    // same rule the SVG parser applies - a saved lens shape must be applicable.
+    const curved = normalized.some((point) => point.handleIn || point.handleOut);
+    if (normalized.length < 3 && !curved) {
+      fail("INVALID_PARAMS", "points must be an array of at least 3 {x, y} objects (or 2 joined by a curve)");
+    }
+    path = { points: normalized, closed: true };
   }
 
   const mask = {

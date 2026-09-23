@@ -52,3 +52,6 @@ export * from "./upscaling";
 
 // SVG mask import
 export * from "./svg-mask-path.js";
+
+// Saved-mask library geometry
+export * from "./mask-library.js";

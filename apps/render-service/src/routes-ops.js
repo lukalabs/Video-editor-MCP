@@ -7,6 +7,7 @@ import { applyOps, createProject, ProjectKitError } from "../../../packages/proj
 import { config } from "./config.js";
 import { getProject, getProjectUpdatedAt, upsertProject } from "./db.js";
 import { createExportQueue, toApiStatus } from "./queue.js";
+import { MaskRequestError, resolveSavedMaskRefs } from "./routes-masks.js";
 
 /**
  * Headless project manipulation (Stage 10).
@@ -55,7 +56,11 @@ export async function registerOpsRoutes(app) {
     try {
       // Atomic: applyOps never mutates the loaded project, so a failure at step N leaves
       // the stored project exactly as it was — nothing is written.
-      const { project, results } = applyOps(record.project, ops);
+      // Saved-mask references become plain points first: the library lives in this
+      // database and project-kit does no I/O. A failed lookup throws here, before
+      // anything is applied, so the batch stays all-or-nothing.
+      const resolved = resolveSavedMaskRefs(ops, record.project);
+      const { project, results } = applyOps(record.project, resolved);
       const saved = upsertProject({ id: project.id, name: project.name, project });
       return {
         ...saved,
@@ -63,8 +68,8 @@ export async function registerOpsRoutes(app) {
         timelineDuration: project.timeline.duration,
       };
     } catch (error) {
-      if (error instanceof ProjectKitError) {
-        return reply.code(400).send({ error: error.message, code: error.code });
+      if (error instanceof ProjectKitError || error instanceof MaskRequestError) {
+        return reply.code(error.status ?? 400).send({ error: error.message, code: error.code });
       }
       throw error;
     }

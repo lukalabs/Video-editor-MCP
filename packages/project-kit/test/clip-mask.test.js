@@ -262,3 +262,19 @@ test("a failing mask op discards the whole batch", () => {
   // The track from step one must not survive the failure in step two.
   assert.equal(project.timeline.tracks.length, 1);
 });
+
+test("accepts two points joined by a curve, as the SVG parser does", () => {
+  // A lens: the renderer wraps around, so two anchors with handles enclose an area. A saved
+  // library shape of this kind has to be applicable through points.
+  const { project, clipId } = projectWithClip();
+
+  const result = setClipMask(project, {
+    clipId,
+    points: [
+      { x: 0.1, y: 0.5, handleOut: { x: 0.3, y: 0.2 }, handleIn: { x: 0.3, y: 0.8 } },
+      { x: 0.9, y: 0.5, handleIn: { x: 0.7, y: 0.2 }, handleOut: { x: 0.7, y: 0.8 } },
+    ],
+  });
+
+  assert.equal(result.project.masks[0].path.points.length, 2);
+});

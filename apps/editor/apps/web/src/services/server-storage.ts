@@ -1,4 +1,4 @@
-import type { Project } from "@openreel/core";
+import type { BezierPath, Project } from "@openreel/core";
 
 import { serializeProjectForAutoSave } from "./auto-save";
 
@@ -263,6 +263,85 @@ export async function restoreProjectVersion(
     { method: "POST" },
   );
   return asJson(response, "Restoring the version");
+}
+
+/* ----------------------------------------------------------- saved masks */
+
+/**
+ * A named mask shape in the server's library, reusable on any clip in any project.
+ *
+ * Applying one copies its path onto the clip (re-fitted to the project's frame with
+ * `refitMaskPath`), and the clip keeps no link back - so deleting an entry never changes a
+ * clip that already uses it.
+ */
+export interface SavedMaskSummary {
+  readonly id: string;
+  readonly name: string;
+  readonly pointCount: number;
+  /** The frame the path is normalized to. Pair `previewPath` with this as the viewBox. */
+  readonly sourceWidth: number | null;
+  readonly sourceHeight: number | null;
+  readonly createdAt: number;
+  readonly previewPath: string;
+}
+
+export interface SavedMask extends Omit<SavedMaskSummary, "previewPath"> {
+  readonly path: BezierPath;
+  readonly sourceSvg: string | null;
+}
+
+/** Thrown for a refused save; `code` is "NAME_TAKEN" when the name is already used. */
+export class SavedMaskError extends Error {
+  readonly code: string;
+
+  constructor(message: string, code: string) {
+    super(message);
+    this.name = "SavedMaskError";
+    this.code = code;
+  }
+}
+
+export async function listSavedMasks(): Promise<SavedMaskSummary[]> {
+  const response = await fetch(`${BASE}/masks`);
+  const body = await asJson<{ masks: SavedMaskSummary[] }>(response, "Listing saved masks");
+  return body.masks;
+}
+
+export async function getSavedMask(id: string): Promise<SavedMask> {
+  const response = await fetch(`${BASE}/masks/${encodeURIComponent(id)}`);
+  return asJson(response, "Loading the saved mask");
+}
+
+/** Saves a shape under a name, in the frame it was made in. */
+export async function saveMaskToLibrary(entry: {
+  name: string;
+  path: BezierPath;
+  sourceWidth: number;
+  sourceHeight: number;
+}): Promise<SavedMaskSummary & { warnings: string[] }> {
+  const response = await fetch(`${BASE}/masks`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(entry),
+  });
+  if (!response.ok) {
+    let message = `Saving the mask failed: ${response.status}`;
+    let code = "UNKNOWN";
+    try {
+      const body = (await response.json()) as { error?: string; code?: string };
+      if (body.error) message = body.error;
+      if (body.code) code = body.code;
+    } catch {
+      // non-JSON error body
+    }
+    throw new SavedMaskError(message, code);
+  }
+  return (await response.json()) as SavedMaskSummary & { warnings: string[] };
+}
+
+export async function deleteSavedMask(id: string): Promise<void> {
+  const response = await fetch(`${BASE}/masks/${encodeURIComponent(id)}`, { method: "DELETE" });
+  await asJson(response, "Deleting the saved mask");
 }
 
 /* ----------------------------------------------------------------- media */

@@ -113,11 +113,18 @@ Available ops:
     wipe/slide take { direction: "left"|"right"|"up"|"down" }, dipToBlack takes
     { holdDuration }).
 
-- set_clip_mask { clipId, svg? | svgPath? | points?, feather?, expansion?, inverted?, opacity?, replace? }
+- set_clip_mask { clipId, svg? | svgPath? | points? | savedMaskName? | savedMaskId?, feather?, expansion?, inverted?, opacity?, replace? }
     Masks a clip to a shape, so only what is inside the shape shows. Give the shape ONE of:
-      svg      - SVG markup as a string
-      svgPath  - a path to an .svg file on this machine, read for you
-      points   - the outline directly, as [{ x, y, handleIn?, handleOut? }, …]
+      svg           - SVG markup as a string
+      svgPath       - a path to an .svg file on this machine, read for you
+      points        - the outline directly, as [{ x, y, handleIn?, handleOut? }, …]
+      savedMaskName - a shape from the saved-mask library (see list_saved_masks); names
+                      match ignoring case
+      savedMaskId   - the same, by id
+    A saved mask is COPIED onto the clip and re-fitted to this project's frame, keeping its
+    proportions and its place in the frame - a circle saved from a vertical project stays a
+    circle in a horizontal one. The clip keeps no link to the library, so deleting or
+    replacing a library entry later never changes a clip that already has it.
     Coordinates are 0-1 of the frame ({ x: 0.5, y: 0.5 } is the centre); handleIn/handleOut
     are absolute points in the same space, not offsets, and omitting them gives a straight
     edge. Only SINGLE-PATH SVGs are accepted: a file with several paths, groups, or shapes
@@ -350,6 +357,92 @@ server.registerTool(
       const where = folder ? ` in "${folder}"` : "";
       return ok(`${projects.length} saved projects${where}.`, projects);
     } catch (error) {
+      return fail(error);
+    }
+  },
+);
+
+server.registerTool(
+  "list_saved_masks",
+  {
+    title: "List saved masks",
+    description:
+      "Lists the saved-mask library: named mask shapes that can be applied to any clip in " +
+      "any project with apply_project_ops' set_clip_mask { savedMaskName } (or savedMaskId). " +
+      "Each entry has id, name, pointCount, the frame size it was made in (sourceWidth x " +
+      "sourceHeight) and previewPath, an SVG outline to draw with viewBox=\"0 0 sourceWidth " +
+      "sourceHeight\". Check here before importing the same logo or silhouette again - " +
+      "entries are only ever added deliberately, with save_mask or the editor's Save as " +
+      "reusable mask, so this is a curated list, not a history of every import.",
+    inputSchema: {},
+  },
+  async () => {
+    try {
+      const { masks } = await service.listSavedMasks();
+      return ok(`${masks.length} saved masks.`, masks);
+    } catch (error) {
+      return fail(error);
+    }
+  },
+);
+
+server.registerTool(
+  "save_mask",
+  {
+    title: "Save a reusable mask",
+    description:
+      "Adds a named shape to the saved-mask library so it can be applied to any clip in any " +
+      "project later with set_clip_mask { savedMaskName }. Give the shape ONE of: svg (markup), " +
+      "svgPath (an .svg file on this machine, read for you), path + sourceWidth + sourceHeight " +
+      "(normalized 0-1 points and the pixel size of the frame they are normalized to), or " +
+      "projectId + clipId (+ maskId if that clip has more than one mask) to save a clip's " +
+      "current mask. SVGs follow set_clip_mask's rules: single path only, no arcs or " +
+      "transforms. Only the shape is saved - feather, inversion and opacity are chosen each " +
+      "time it is applied - and only the current shape of an animated mask. Track mattes " +
+      "cannot be saved: their shape comes from another clip. Names must be unique ignoring " +
+      "case; there is no rename, so to change one, save it again under the new name. " +
+      "Deleting an entry never affects clips it was already applied to.",
+    inputSchema: {
+      name: z.string().describe("Name to save it under. Unique, ignoring case."),
+      svg: z.string().optional().describe("SVG markup for a single-path shape."),
+      svgPath: z.string().optional().describe("Path to a single-path .svg file on this machine."),
+      path: z
+        .object({ points: z.array(z.object({ x: z.number(), y: z.number() }).passthrough()) })
+        .passthrough()
+        .optional()
+        .describe("The outline as normalized 0-1 points, { points: [{ x, y, handleIn?, handleOut? }] }."),
+      sourceWidth: z.number().optional().describe("Pixel width of the frame `path` is normalized to."),
+      sourceHeight: z.number().optional().describe("Pixel height of the frame `path` is normalized to."),
+      projectId: z.string().optional().describe("Save a clip's current mask: the project it is in."),
+      clipId: z.string().optional().describe("Save a clip's current mask: the clip."),
+      maskId: z.string().optional().describe("Which of the clip's masks, if it has more than one."),
+    },
+  },
+  async ({ svgPath, ...body }) => {
+    try {
+      if (svgPath !== undefined) {
+        if (body.svg !== undefined) throw new Error("Pass either svg or svgPath, not both.");
+        try {
+          body.svg = await readFile(svgPath, "utf8");
+        } catch (error) {
+          throw new Error(`Could not read the SVG at ${svgPath}: ${error.message}`);
+        }
+      }
+      const saved = await service.saveMask(body);
+      const notes = saved.warnings?.length ? ` Note: ${saved.warnings.join(" ")}` : "";
+      return ok(
+        `Saved "${saved.name}" (${saved.pointCount} points). Apply it with set_clip_mask ` +
+          `{ savedMaskName: "${saved.name}" }.${notes}`,
+        saved,
+      );
+    } catch (error) {
+      if (error?.status === 409) {
+        return fail(new Error(`${error.body?.error ?? "That name is taken"}. Pick another name.`));
+      }
+      if (error?.status === 400 || error?.status === 404) {
+        return fail(new Error(`${error.body?.error ?? "Invalid request"}` +
+          (error.body?.code ? ` [${error.body.code}]` : "")));
+      }
       return fail(error);
     }
   },

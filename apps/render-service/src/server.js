@@ -8,6 +8,7 @@ import Fastify from "fastify";
 import { getComponent, listComponents, resolveDuration, validateProps } from "./components.js";
 import { config } from "./config.js";
 import { createQueue, toApiStatus } from "./queue.js";
+import { registerMaskRoutes } from "./routes-masks.js";
 import { registerOpsRoutes } from "./routes-ops.js";
 import { parseByteRange, registerStorageRoutes } from "./routes-storage.js";
 import { sweepAll } from "./sweep.js";
@@ -196,6 +197,7 @@ async function main() {
   await fs.mkdir(config.storageDir, { recursive: true });
   await registerStorageRoutes(app);
   await registerOpsRoutes(app);
+  await registerMaskRoutes(app);
   await app.listen({ host: config.host, port: config.port });
   app.log.info(
     `render-service on http://${config.host}:${config.port} — storage ${config.storageDir}`,

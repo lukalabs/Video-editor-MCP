@@ -131,6 +131,14 @@ no access to the caller's disk. The parsing is the editor's own module
 (`packages/core/src/video/svg-mask-path.js`), imported by project-kit rather than
 reimplemented, so a mask built by an agent is identical to one imported in the UI.
 
+**Saved masks.** `list_saved_masks` and `save_mask` front the render-service's `/masks`
+library; `set_clip_mask { savedMaskName }` applies an entry. The descriptions state the
+property an agent has to trust before deleting anything: applying **copies** the shape onto
+the clip, re-fitted to that project's frame, so deleting a library entry never changes a
+clip that already has it. `save_mask` is a tool rather than an op on purpose — ops are pure
+JSON and an ops batch is all-or-nothing, which a library write inside it would break. The
+saved-mask reference is resolved into points by the ops route, before project-kit runs.
+
 ### Concurrency
 
 Ops are written through render-service's optimistic-concurrency guard. `apply_project_ops`

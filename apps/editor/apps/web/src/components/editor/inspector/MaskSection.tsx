@@ -5,6 +5,8 @@ import {
   Pentagon,
   Pen,
   FileUp,
+  BookmarkPlus,
+  Library,
   Layers,
   Trash2,
   Eye,
@@ -28,8 +30,21 @@ import { PropertySlider } from "./shell/PropertySlider";
 import { useEngineStore } from "../../../stores/engine-store";
 import { useProjectStore } from "../../../stores/project-store";
 import type { BezierPath, Mask, MaskShape } from "@openreel/core";
-import { boundsPathFromTransform, parseSvgToMaskPath, SvgMaskImportError } from "@openreel/core";
+import {
+  boundsPathFromTransform,
+  parseSvgToMaskPath,
+  refitMaskPath,
+  SvgMaskImportError,
+} from "@openreel/core";
 import { toast } from "../../../stores/notification-store";
+import {
+  deleteSavedMask,
+  getSavedMask,
+  listSavedMasks,
+  saveMaskToLibrary,
+  SavedMaskError,
+  type SavedMaskSummary,
+} from "../../../services/server-storage";
 
 interface MaskSectionProps {
   clipId: string;
@@ -67,6 +82,12 @@ const MaskItem: React.FC<{
     sourceClipId: string,
     matteSource: "alpha" | "luminance" | "bounds",
   ) => void;
+  /**
+   * Saves this mask's shape to the library under a name. Resolves to an error message to
+   * show next to the name field, or null on success. Absent for track mattes, whose shape
+   * comes from another clip at render time.
+   */
+  onSaveToLibrary?: (name: string) => Promise<string | null>;
 }> = ({
   mask,
   isSelected,
@@ -83,6 +104,7 @@ const MaskItem: React.FC<{
   onToggleInvert,
   onUpdatePath,
   onSetMatteSource,
+  onSaveToLibrary,
 }) => {
   const maskTypeIcon =
     mask.type === "shape"
@@ -101,6 +123,29 @@ const MaskItem: React.FC<{
   const availableSources = matteSourceOptions.filter(
     (opt) => opt.id !== ownClipId,
   );
+  const [naming, setNaming] = useState(false);
+  const [saveName, setSaveName] = useState("");
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  const submitSave = async () => {
+    if (!onSaveToLibrary || saving) return;
+    const name = saveName.trim();
+    if (!name) {
+      setSaveError("Give it a name.");
+      return;
+    }
+    setSaving(true);
+    const error = await onSaveToLibrary(name);
+    setSaving(false);
+    if (error) {
+      setSaveError(error);
+    } else {
+      setNaming(false);
+      setSaveName("");
+      setSaveError(null);
+    }
+  };
 
   return (
     <Card
@@ -161,6 +206,20 @@ const MaskItem: React.FC<{
               : "text-fg-3 hover:text-fg"
           }
         />
+        {onSaveToLibrary && (
+          <IconButton
+            label="Save as reusable mask"
+            onClick={(e) => {
+              e.stopPropagation();
+              setNaming((open) => !open);
+              setSaveError(null);
+            }}
+            variant="ghost"
+            size="sm"
+            icon={<BookmarkPlus size={10} aria-hidden />}
+            className={naming ? "bg-primary/20 text-primary" : "text-fg-3 hover:text-fg"}
+          />
+        )}
         <IconButton
           label="Duplicate Mask"
           onClick={(e) => {
@@ -184,6 +243,46 @@ const MaskItem: React.FC<{
           className="text-fg-3 hover:text-red-400"
         />
       </div>
+
+      {naming && onSaveToLibrary && (
+        <div
+          className="space-y-1.5 border-t border-border bg-bg-1 p-2"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <Text type="supporting" color="secondary" className="text-[9.5px]">
+            Save this shape to the mask library, to reuse on any clip in any project.
+          </Text>
+          <div className="flex items-center gap-1">
+            <input
+              aria-label="Name for the saved mask"
+              autoFocus
+              value={saveName}
+              maxLength={120}
+              placeholder="e.g. Brand logo"
+              onChange={(event) => {
+                setSaveName(event.target.value);
+                setSaveError(null);
+              }}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") void submitSave();
+                if (event.key === "Escape") setNaming(false);
+              }}
+              className="h-6 min-w-0 flex-1 rounded border border-border bg-bg-2 px-1.5 text-[10px] text-fg outline-none focus:border-primary"
+            />
+            <Button
+              label={saving ? "Saving..." : "Save"}
+              onClick={() => void submitSave()}
+              variant="ghost"
+              size="sm"
+            />
+          </div>
+          {saveError && (
+            <Text type="supporting" className="text-[9.5px] text-red-400" role="alert">
+              {saveError}
+            </Text>
+          )}
+        </div>
+      )}
 
       {isExpanded && (
         <div className="p-2 space-y-3 border-t border-border bg-bg-2/50">
@@ -390,6 +489,10 @@ export const MaskSection: React.FC<MaskSectionProps> = ({ clipId }) => {
   const project = useProjectStore((s) => s.project);
   const getAllTextClips = useProjectStore((s) => s.getAllTextClips);
   const svgInputRef = useRef<HTMLInputElement>(null);
+  const [libraryOpen, setLibraryOpen] = useState(false);
+  const [libraryMasks, setLibraryMasks] = useState<SavedMaskSummary[] | null>(null);
+  const [libraryError, setLibraryError] = useState<string | null>(null);
+  const [pendingLibraryDelete, setPendingLibraryDelete] = useState<string | null>(null);
   const [selectedMaskId, setSelectedMaskId] = useState<string | null>(null);
   const [expandedMasks, setExpandedMasks] = useState<Set<string>>(new Set());
   const [refreshKey, setRefreshKey] = useState(0);
@@ -671,6 +774,111 @@ export const MaskSection: React.FC<MaskSectionProps> = ({ clipId }) => {
     [clipId, maskEngine, project, triggerRefresh],
   );
 
+  const refreshLibrary = useCallback(async () => {
+    try {
+      setLibraryError(null);
+      setLibraryMasks(await listSavedMasks());
+    } catch (error) {
+      setLibraryError(error instanceof Error ? error.message : "Could not load the mask library.");
+    }
+  }, []);
+
+  useEffect(() => {
+    if (libraryOpen) void refreshLibrary();
+  }, [libraryOpen, refreshLibrary]);
+
+  /**
+   * Saves a mask's current shape to the library, in this project's frame.
+   *
+   * Explicit only: nothing reaches the library unless someone presses this, so an SVG
+   * imported for one clip stays that clip's.
+   */
+  const handleSaveToLibrary = useCallback(
+    async (mask: Mask, name: string): Promise<string | null> => {
+      if (!project) return "No project is open.";
+      try {
+        const saved = await saveMaskToLibrary({
+          name,
+          path: mask.path,
+          sourceWidth: project.settings.width,
+          sourceHeight: project.settings.height,
+        });
+        const animated = mask.keyframes.length > 0;
+        toast.success(
+          "Saved to mask library",
+          `"${saved.name}" can now be applied to any clip in any project.` +
+            (animated ? " Only its current shape was saved, not its animation." : ""),
+        );
+        if (libraryOpen) void refreshLibrary();
+        return null;
+      } catch (error) {
+        if (error instanceof SavedMaskError && error.code === "NAME_TAKEN") {
+          return "That name is already in the library - pick another.";
+        }
+        return error instanceof Error ? error.message : "Could not save the mask.";
+      }
+    },
+    [libraryOpen, project, refreshLibrary],
+  );
+
+  /**
+   * Applies a library entry to this clip as an ordinary drawn mask.
+   *
+   * The path is re-fitted from the frame it was saved in to this project's frame, and
+   * refitMaskPath always returns a fresh copy - so the clip owns its shape outright and
+   * nothing links it back to the library entry.
+   */
+  const handleApplySavedMask = useCallback(
+    async (entry: SavedMaskSummary) => {
+      if (!maskEngine || !project) return;
+      try {
+        const saved = await getSavedMask(entry.id);
+        const from =
+          saved.sourceWidth && saved.sourceHeight
+            ? { width: saved.sourceWidth, height: saved.sourceHeight }
+            : null;
+        const path = refitMaskPath(saved.path, from, {
+          width: project.settings.width,
+          height: project.settings.height,
+        });
+        const mask = maskEngine.createDrawnMask(clipId, path);
+        setSelectedMaskId(mask.id);
+        setExpandedMasks((prev) => new Set([...prev, mask.id]));
+        triggerRefresh();
+        toast.success("Mask applied", `"${saved.name}" - ${path.points.length} points, ready to edit.`);
+      } catch (error) {
+        toast.error(
+          "Could not apply the saved mask",
+          error instanceof Error ? error.message : "The mask could not be loaded.",
+        );
+      }
+    },
+    [clipId, maskEngine, project, triggerRefresh],
+  );
+
+  const handleDeleteSavedMask = useCallback(
+    async (entry: SavedMaskSummary) => {
+      if (pendingLibraryDelete !== entry.id) {
+        // First press arms it, the second confirms. Clips already using the shape keep
+        // their own copy either way.
+        setPendingLibraryDelete(entry.id);
+        return;
+      }
+      setPendingLibraryDelete(null);
+      try {
+        await deleteSavedMask(entry.id);
+        toast.success(
+          "Removed from mask library",
+          `"${entry.name}" is gone from the library. Clips already using it are unchanged.`,
+        );
+        void refreshLibrary();
+      } catch (error) {
+        toast.error("Could not delete", error instanceof Error ? error.message : "Unknown error");
+      }
+    },
+    [pendingLibraryDelete, refreshLibrary],
+  );
+
   const handleToggleInvert = useCallback(
     (maskId: string) => {
       if (!maskEngine) return;
@@ -812,6 +1020,23 @@ export const MaskSection: React.FC<MaskSectionProps> = ({ clipId }) => {
             }}
           />
           <ClickableCard
+            label="Open the mask library"
+            onClick={() => {
+              setLibraryOpen((open) => !open);
+              setPendingLibraryDelete(null);
+            }}
+            padding={2}
+            variant="muted"
+            className={`flex flex-col items-center gap-1 border bg-bg-2 hover:border-primary/30 hover:bg-primary/20 ${
+              libraryOpen ? "border-primary/50" : "border-transparent"
+            }`}
+          >
+            <Library size={14} className="text-fg-2" />
+            <Text type="supporting" color="secondary" className="text-[8px]">
+              From library
+            </Text>
+          </ClickableCard>
+          <ClickableCard
             label="Use another clip as a track matte"
             onClick={handleAddTrackMatte}
             padding={2}
@@ -825,6 +1050,92 @@ export const MaskSection: React.FC<MaskSectionProps> = ({ clipId }) => {
           </ClickableCard>
         </div>
       </div>
+
+      {libraryOpen && (
+        <div
+          className="space-y-1.5 rounded border border-border bg-bg-1 p-2"
+          aria-label="Mask library"
+          role="region"
+        >
+          <div className="flex items-center justify-between">
+            <Text type="supporting" color="primary" className="text-[10px] font-medium">
+              Mask library{libraryMasks ? ` (${libraryMasks.length})` : ""}
+            </Text>
+            <Button
+              label="Refresh"
+              onClick={() => void refreshLibrary()}
+              variant="ghost"
+              size="sm"
+              icon={<RefreshCw size={10} aria-hidden />}
+            />
+          </div>
+          {libraryError ? (
+            <Text type="supporting" className="text-[9.5px] text-red-400" role="alert">
+              {libraryError}
+            </Text>
+          ) : libraryMasks === null ? (
+            <Text type="supporting" color="secondary" className="text-[9.5px]">
+              Loading...
+            </Text>
+          ) : libraryMasks.length === 0 ? (
+            <Text type="supporting" color="secondary" className="text-[9.5px]">
+              Nothing saved yet. Use the bookmark button on any mask to save its shape here.
+            </Text>
+          ) : (
+            <div className="max-h-56 space-y-1 overflow-auto pr-0.5">
+              {libraryMasks.map((entry) => (
+                <div
+                  key={entry.id}
+                  className="flex items-center gap-2 rounded border border-border bg-bg-2 p-1"
+                >
+                  <svg
+                    viewBox={`0 0 ${entry.sourceWidth ?? 1} ${entry.sourceHeight ?? 1}`}
+                    className="h-8 w-8 shrink-0 rounded bg-bg-1 text-fg-2"
+                    aria-hidden
+                  >
+                    <path d={entry.previewPath} fill="currentColor" />
+                  </svg>
+                  <div className="min-w-0 flex-1">
+                    <Text
+                      type="supporting"
+                      color="primary"
+                      className="block truncate text-[10px] font-medium"
+                    >
+                      {entry.name}
+                    </Text>
+                    <Text type="supporting" color="secondary" className="text-[8.5px]">
+                      {entry.pointCount} points
+                    </Text>
+                  </div>
+                  <Button
+                    label={`Apply saved mask ${entry.name}`}
+                    onClick={() => void handleApplySavedMask(entry)}
+                    variant="ghost"
+                    size="sm"
+                    icon={<Plus size={10} aria-hidden />}
+                  />
+                  <IconButton
+                    label={
+                      pendingLibraryDelete === entry.id
+                        ? `Confirm delete of saved mask ${entry.name}`
+                        : `Delete saved mask ${entry.name}`
+                    }
+                    onClick={() => void handleDeleteSavedMask(entry)}
+                    variant="ghost"
+                    size="sm"
+                    icon={<Trash2 size={10} aria-hidden />}
+                    className={
+                      pendingLibraryDelete === entry.id
+                        ? "bg-red-400/20 text-red-400"
+                        : "text-fg-3 hover:text-red-400"
+                    }
+                  />
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {masks.length > 0 ? (
         <div className="space-y-2">
@@ -862,6 +1173,11 @@ export const MaskSection: React.FC<MaskSectionProps> = ({ clipId }) => {
                 onUpdatePath={(path) => handleUpdatePath(mask.id, path)}
                 onSetMatteSource={(srcId, channel) =>
                   handleSetMatteSource(mask.id, srcId, channel)
+                }
+                onSaveToLibrary={
+                  mask.type === "track-matte"
+                    ? undefined
+                    : (name) => handleSaveToLibrary(mask, name)
                 }
               />
             ))}
