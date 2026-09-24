@@ -4080,3 +4080,56 @@ landed alone on its own clip; with the playhead on one clip for 5s the shared en
 held every clip's masks and a new mask kept the other clip's star. Regression: Rectangle,
 Ellipse, Polygon, Custom, Track Matte and a library-applied ellipse on six clips, 28/28
 sampled points correct in preview and 28/28 in export.
+
+## Stage 32 — CTA button set
+
+Ten separately named buttons, `button-<style>-Rep`, original Motion Canvas work. The older
+parameterised `button` component is untouched: the orchestrator's `button` step uses it.
+
+| id | corners · fill | motion |
+|---|---|---|
+| `button-pulse-glow-Rep` | pill · solid | pops in; swells with a blooming glow |
+| `button-shimmer-Rep` | rounded · solid | slides up; clipped diagonal sheen sweeps across |
+| `button-outline-draw-Rep` | sharp · outline | border draws itself, label rises; border breathes |
+| `button-fill-sweep-Rep` | rounded · outline→solid | fill wipes in and the label flips colour where it passes |
+| `button-ghost-float-Rep` | pill · ghost | rises in; drifts up and down, fill breathes |
+| `button-press-3d-Rep` | sharp · solid + depth | pops in; clicks down into its depth block |
+| `button-bounce-in-Rep` | pill · solid | elastic scale-in; periodic rotation wiggle |
+| `button-blink-flash-Rep` | sharp · solid | fill hard-cuts between two colours with a scale tick |
+| `button-gradient-flow-Rep` | pill · gradient | two-colour gradient scrolls seamlessly through the fill |
+| `button-ripple-rings-Rep` | rounded · solid | rings in the button's shape expand out and fade |
+
+### One shell, one measurer
+
+`src/lib/cta-button.tsx` owns sizing and the body; each scene adds only its look and motion.
+Width is the measured text plus 0.9em padding a side, never under 2x the height; height is
+the line height plus 0.45em a side; past the frame-safe width (84% of the frame) the label
+wraps and the button grows taller, so text never clips. Measurement is `text-measure.ts`,
+the chat bubbles' own - not a second implementation - with its error prefixes made neutral.
+The face is the already-vendored DM Sans, which turned out to be a variable font (wght
+100-1000), so real bold came free with no new asset.
+
+Defaults for all ten live in `src/lib/cta-button-defaults.ts`, imported by both scene and
+project: a project imports its scene via `?scene`, which exposes no named exports, so the
+scene cannot take defaults from its own project file without a cycle.
+
+### Idle loops fit the clip
+
+A button enters, then loops its idle motion to the end. `repeatFor` picks the nearest whole
+number of cycles and stretches them to end exactly on the last frame. The first version ran
+whole cycles and waited out the remainder, and the verification caught it: gradient-flow sat
+frozen for the last 1.5s of a 4s clip, pulse-glow for 1.1s - which reads as broken on
+something meant to hold to the end. Interval params are therefore approximate, and say so.
+
+### Verified
+
+62 renders, measured from the alpha channel (opaque pixels only - glows, rings and ghost
+fills stay translucent so they cannot be mistaken for the button), at each scene's rest frame:
+widths grow with the text (268 / 432 / 646 px for "Go" / "Download" / "Get Started Now");
+"Go" holds the 2x-height minimum; left and right text gaps within 1px; zero label pixels
+outside any button; an over-long label wraps to 3 lines inside the 907px limit; every button
+still moving at 3.7-4.0s of a 4s clip (shimmer 3.1s - its cycle ends on a pause). Buttons
+whose label shares the border colour (outline-draw, ghost-float, press-3d) were re-rendered
+with a magenta label for the containment check: with the default colours, border
+anti-aliasing one pixel outside the edge was indistinguishable from text, and passing there
+would have proved nothing.

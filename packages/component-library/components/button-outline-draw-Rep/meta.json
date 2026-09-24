@@ -1,0 +1,82 @@
+{
+  "id": "button-outline-draw-Rep",
+  "name": "Button Outline Draw Rep",
+  "description": "Square outline that draws itself",
+  "project": "src/projects/button-outline-draw-Rep.ts",
+  "durationParam": "durationInSeconds",
+  "defaultWidth": 1080,
+  "defaultHeight": 1920,
+  "params": [
+    {
+      "key": "text",
+      "label": "Button text",
+      "type": "text",
+      "default": "Get Started",
+      "description": "The label. The button sizes itself to it: longer text makes a wider button, very short text keeps a minimum width, and text too wide for the frame wraps onto more lines."
+    },
+    {
+      "key": "backgroundColor",
+      "label": "Outline colour",
+      "type": "color",
+      "default": "#f8fafc",
+      "description": "Colour of the border. This button has no fill, so footage shows through."
+    },
+    {
+      "key": "textColor",
+      "label": "Text colour",
+      "type": "color",
+      "default": "#f8fafc",
+      "description": "Colour of the label."
+    },
+    {
+      "key": "borderWidth",
+      "label": "Border width (px)",
+      "type": "number",
+      "default": 6,
+      "min": 1,
+      "max": 24,
+      "step": 1,
+      "description": "Thickness of the outline."
+    },
+    {
+      "key": "drawSeconds",
+      "label": "Draw time (s)",
+      "type": "number",
+      "default": 0.9,
+      "min": 0.3,
+      "max": 4,
+      "step": 0.1,
+      "description": "How long the border takes to draw itself around the button."
+    },
+    {
+      "key": "fontSize",
+      "label": "Font size (px)",
+      "type": "number",
+      "default": 64,
+      "min": 16,
+      "max": 200,
+      "step": 1,
+      "description": "Label size. The button's height follows it, and its width follows the measured text."
+    },
+    {
+      "key": "positionY",
+      "label": "Vertical position (0 top / 1 bottom)",
+      "type": "number",
+      "default": 0.5,
+      "min": 0.05,
+      "max": 0.95,
+      "step": 0.01,
+      "description": "Where the button's centre sits in the frame, 0 at the top edge and 1 at the bottom."
+    },
+    {
+      "key": "durationInSeconds",
+      "label": "Duration (s)",
+      "type": "number",
+      "default": 4,
+      "min": 0.5,
+      "max": 30,
+      "step": 0.5,
+      "description": "Clip length. The button enters, then idles on a loop and stays on screen to the end."
+    }
+  ]
+}

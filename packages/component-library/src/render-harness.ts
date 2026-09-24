@@ -8,7 +8,8 @@
  *
  * Query parameters:
  *   project  component id (stat-counter | button | turbulent-background-Rep
- *            | orbit-headline-Rep | chat-bubble-single-Rep | chat-thread-Rep)
+ *            | orbit-headline-Rep | chat-bubble-single-Rep | chat-thread-Rep
+ *            | the ten CTA buttons, button-<style>-Rep)
  *   props    URL-encoded JSON, read by src/lib/props.ts inside the project module
  *   fps      frames per second (default 30)
  *   width    frame width in px (default 1920)
@@ -22,6 +23,16 @@ import { Renderer, Vector2 } from "@motion-canvas/core";
 import type { Project } from "@motion-canvas/core";
 
 import button from "./projects/button?project";
+import buttonPulseGlow from "./projects/button-pulse-glow-Rep?project";
+import buttonShimmer from "./projects/button-shimmer-Rep?project";
+import buttonOutlineDraw from "./projects/button-outline-draw-Rep?project";
+import buttonFillSweep from "./projects/button-fill-sweep-Rep?project";
+import buttonGhostFloat from "./projects/button-ghost-float-Rep?project";
+import buttonPress3d from "./projects/button-press-3d-Rep?project";
+import buttonBounceIn from "./projects/button-bounce-in-Rep?project";
+import buttonBlinkFlash from "./projects/button-blink-flash-Rep?project";
+import buttonGradientFlow from "./projects/button-gradient-flow-Rep?project";
+import buttonRippleRings from "./projects/button-ripple-rings-Rep?project";
 import chatBubbleSingle from "./projects/chat-bubble-single-Rep?project";
 import chatThread from "./projects/chat-thread-Rep?project";
 import orbitHeadline from "./projects/orbit-headline-Rep?project";
@@ -31,6 +42,16 @@ import turbulentBackground from "./projects/turbulent-background-Rep?project";
 const PROJECTS: Record<string, Project> = {
   "stat-counter": statCounter,
   button,
+  "button-pulse-glow-Rep": buttonPulseGlow,
+  "button-shimmer-Rep": buttonShimmer,
+  "button-outline-draw-Rep": buttonOutlineDraw,
+  "button-fill-sweep-Rep": buttonFillSweep,
+  "button-ghost-float-Rep": buttonGhostFloat,
+  "button-press-3d-Rep": buttonPress3d,
+  "button-bounce-in-Rep": buttonBounceIn,
+  "button-blink-flash-Rep": buttonBlinkFlash,
+  "button-gradient-flow-Rep": buttonGradientFlow,
+  "button-ripple-rings-Rep": buttonRippleRings,
   "turbulent-background-Rep": turbulentBackground,
   "orbit-headline-Rep": orbitHeadline,
   "chat-bubble-single-Rep": chatBubbleSingle,

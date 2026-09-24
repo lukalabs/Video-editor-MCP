@@ -1,5 +1,6 @@
 /**
- * Text measurement for the balloon bubbles, plus the font-readiness gate.
+ * Text measurement for anything sized by its own text - the balloon bubbles and the CTA
+ * buttons - plus the font-readiness gate.
  *
  * ## Why measure at all
  *
@@ -50,7 +51,7 @@ function context(): CanvasRenderingContext2D {
   if (ctx) return ctx;
   const canvas = document.createElement("canvas");
   const found = canvas.getContext("2d");
-  if (!found) throw new Error("[chat-bubble] no 2D context for text measurement");
+  if (!found) throw new Error("[text-measure] no 2D context for text measurement");
   ctx = found;
   return ctx;
 }
@@ -176,7 +177,7 @@ export async function ensureFont(
       // FontFace rejects with a bare "A network error occurred" that names neither the font
       // nor the URL, which is a poor thing to find in a render log.
       throw new Error(
-        `[chat-bubble] could not fetch font "${family}" from ${url} — ${String(error)}. ` +
+        `[text-measure] could not fetch font "${family}" from ${url} — ${String(error)}. ` +
           `The asset is imported by chat-font.ts; check it exists and that the dev server ` +
           `serves it.`,
       );
@@ -209,7 +210,7 @@ export async function ensureFont(
 
   if (Math.abs(withFamily - fallbackOnly) < 0.5) {
     throw new Error(
-      `[chat-bubble] font "${family}" did not load from ${url} — text measured identically ` +
+      `[text-measure] font "${family}" did not load from ${url} — text measured identically ` +
         `to the fallback (${withFamily.toFixed(2)}px vs ${fallbackOnly.toFixed(2)}px). ` +
         `Rendering would silently use a substitute font and every bubble would be the ` +
         `wrong width.`,
