@@ -458,7 +458,7 @@ export function createSavedMask({ id, name, path, sourceWidth, sourceHeight, sou
 
 export function listSavedMasks() {
   return getDb()
-    .prepare("SELECT * FROM saved_masks ORDER BY created_at DESC")
+    .prepare("SELECT * FROM saved_masks ORDER BY created_at DESC, rowid DESC")
     .all()
     .map((row) => rowToSavedMask(row, { withSource: false }));
 }
@@ -522,14 +522,22 @@ export function createProjectVersion({ projectId, project, origin, label }) {
   return getProjectVersionMeta(id);
 }
 
-/** Metadata only, newest first - the list view never needs the blobs. */
+/**
+ * Metadata only, newest first - the list view never needs the blobs.
+ *
+ * `rowid` breaks ties: two saves in the same millisecond share `created_at`, and without a
+ * second key their order was left to SQLite, so "newest first" held only about half the
+ * time. The id is no use here - it is a random UUID - but rowid grows with every insert, so
+ * it is exactly save order. listAllProjectVersionMeta (the retention sweep, where a tie
+ * decides which version is pruned) and listSavedMasks use the same key for the same reason.
+ */
 export function listProjectVersions(projectId) {
   return getDb()
     .prepare(
       `SELECT id, project_id, origin, created_at, size_bytes, clip_count, duration, label
          FROM project_versions
         WHERE project_id = ?
-        ORDER BY created_at DESC`,
+        ORDER BY created_at DESC, rowid DESC`,
     )
     .all(projectId)
     .map(toVersionMeta);
@@ -611,7 +619,7 @@ export function listAllProjectVersionMeta() {
   return getDb()
     .prepare(
       `SELECT id, project_id, origin, created_at, size_bytes, clip_count, duration, label
-         FROM project_versions ORDER BY created_at DESC`,
+         FROM project_versions ORDER BY created_at DESC, rowid DESC`,
     )
     .all()
     .map(toVersionMeta);

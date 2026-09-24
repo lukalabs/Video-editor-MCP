@@ -295,3 +295,14 @@ test("applying copies the shape: deleting the entry leaves the clip's mask intac
 
   assert.equal(JSON.stringify(applied.masks), before);
 });
+
+test("lists same-millisecond saves newest first, deterministically", async () => {
+  const ids = [];
+  for (const name of ["A", "B", "C", "D"]) {
+    ids.push((await post({ name, svg: STAR_SVG })).body.id);
+  }
+  db.getDb().exec("UPDATE saved_masks SET created_at = 1700000000000");
+
+  const { masks: listed } = (await app.inject({ url: "/masks" })).json();
+  assert.deepEqual(listed.map((m) => m.id), [...ids].reverse());
+});

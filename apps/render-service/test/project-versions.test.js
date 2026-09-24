@@ -283,3 +283,22 @@ test("a dry run reports what it would prune without pruning it", () => {
   assert.equal(result.removed.length, 5);
   assert.equal(db.listProjectVersions("p1").length, 35);
 });
+
+test("orders same-millisecond versions by when they were saved, not at random", () => {
+  // Two saves inside one millisecond share created_at. Sorting on the timestamp alone left
+  // their order to SQLite, so "newest first" held only about half the time. Force the tie
+  // rather than hoping the clock produces one.
+  db.upsertProject({ id: "p1", name: "Demo", project: project("p1", "Demo") });
+  const ids = [];
+  for (let i = 0; i < 5; i++) {
+    const version = db.createProjectVersion({ projectId: "p1", project: project("p1", `v${i}`), origin: "auto" });
+    setCreatedAt(version.id, 1_700_000_000_000);
+    ids.push(version.id);
+  }
+
+  assert.deepEqual(db.listProjectVersions("p1").map((v) => v.id), [...ids].reverse());
+  assert.deepEqual(
+    db.listAllProjectVersionMeta().filter((v) => v.projectId === "p1").map((v) => v.id),
+    [...ids].reverse(),
+  );
+});
