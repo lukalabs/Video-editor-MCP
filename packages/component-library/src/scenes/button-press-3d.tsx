@@ -3,6 +3,7 @@ import { all, createSignal, easeOutBack, easeOutQuad, useScene, waitFor } from "
 
 import {
   buildCtaShell,
+  holdToClipEnd,
   idleSeconds,
   layoutCta,
   loadCtaFont,
@@ -68,4 +69,5 @@ export default makeScene2D(function* (view) {
     yield* press(1, PRESS_DOWN, easeOutQuad);
     yield* press(0, PRESS_UP, easeOutBack);
   }, PRESS_DOWN + PRESS_UP + 0.2);
+  yield* holdToClipEnd(params.durationInSeconds);
 });

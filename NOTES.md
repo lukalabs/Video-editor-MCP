@@ -4182,3 +4182,26 @@ in the editor rather than in the database: selecting the shimmer clip put the Co
 panel into re-render mode with the clip's own params (custom colour included), and "Re-render
 clip" produced a new render (`119.webm`) under `button-shimmer` and swapped it into the clip.
 Anyone else's database needs the same one command.
+
+## Stage 34 — CTA buttons render exactly the requested length
+
+Every button rendered one frame long: a 4s request produced 122 frames (4.033s) where 121 is
+right, visible on real clips as a 4.0333s duration. Cause: Motion Canvas keeps a thread's time
+as the exact sum of requested durations and ends the scene on the first frame at or past it;
+`repeatFor`'s fitted cycles sum to the clip length only in floating point (three 1.1667s pulses
+= 3.5000000000000004), and landing a hair past a frame boundary buys a whole frame.
+
+The first fix - fill the idle 0.1ms short (`FIT_SLACK`) - made seven buttons exact and three a
+frame *short*. `waitFor` finishes one frame early on purpose, comparing against a frame clock
+that is itself a running float sum, so shimmer, blink-flash and fill-sweep (whose idle ends on a
+wait) had been getting their last frame only because float noise tipped that comparison. The
+exact-length version worked for them by luck, and any trim flipped it. Measured, not assumed:
+the verification that runs every button at several lengths is what caught both directions.
+
+Final fix, two parts: `FIT_SLACK` keeps idle work from ever running past the end, and every scene
+now ends with `holdToClipEnd`, which advances frame by frame until the frame clock is within half
+a frame of the requested length - so the end no longer depends on how the last call rounds.
+
+Verified on all ten at 2.5s, 4s and 7.3s: 76, 121 and 220 frames, 30 of 30 exact; the full
+sizing and motion suite passes again. Clips rendered before this fix keep their extra frame
+until re-rendered.

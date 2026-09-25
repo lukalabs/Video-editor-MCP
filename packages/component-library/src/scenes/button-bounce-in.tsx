@@ -3,6 +3,7 @@ import { easeInOutSine, easeOutElastic, useScene, waitFor } from "@motion-canvas
 
 import {
   buildCtaShell,
+  holdToClipEnd,
   idleSeconds,
   layoutCta,
   loadCtaFont,
@@ -47,4 +48,5 @@ export default makeScene2D(function* (view) {
       yield* root.rotation(angle, WIGGLE_STEP, easeInOutSine);
     }
   }, wiggleTime + 0.3);
+  yield* holdToClipEnd(params.durationInSeconds);
 });

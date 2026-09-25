@@ -3,6 +3,7 @@ import { all, easeOutCubic, easeOutQuad, useScene, waitFor } from "@motion-canva
 
 import {
   buildCtaShell,
+  holdToClipEnd,
   idleSeconds,
   layoutCta,
   loadCtaFont,
@@ -53,4 +54,5 @@ export default makeScene2D(function* (view) {
     body.fill(params.backgroundColor);
     yield* waitFor(half);
   });
+  yield* holdToClipEnd(params.durationInSeconds);
 });

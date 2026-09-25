@@ -2,7 +2,9 @@ import { Rect, makeScene2D } from "@motion-canvas/2d";
 import { all, createSignal, delay, easeOutBack, easeOutCubic, useScene, waitFor } from "@motion-canvas/core";
 
 import {
+  FIT_SLACK,
   buildCtaShell,
+  holdToClipEnd,
   idleSeconds,
   layoutCta,
   loadCtaFont,
@@ -68,7 +70,8 @@ export default makeScene2D(function* (view) {
   yield* all(root.scale(1, ENTRANCE, easeOutBack), root.opacity(1, ENTRANCE * 0.6));
 
   // restAt = ENTRANCE: full size; the first ring starts here, at the edge.
-  const idle = idleSeconds(params, ENTRANCE);
+  // Short of the clip end by FIT_SLACK, for the same reason repeatFor is.
+  const idle = Math.max(0, idleSeconds(params, ENTRANCE) - FIT_SLACK);
   // Spacing is fitted like repeatFor's cycles: the nearest whole number of rings, spread so
   // the last one finishes exactly as the clip ends - no ring cut off mid-ripple, and no dead
   // stretch at the end. rippleInterval is therefore approximate.
@@ -81,4 +84,5 @@ export default makeScene2D(function* (view) {
   yield* all(...Array.from({ length: count }, (_, i) => delay(i * spacing, ripple(i))));
   const ringsEnd = count > 0 ? (count - 1) * spacing + RING_LIFE : 0;
   yield* waitFor(Math.max(0, idle - ringsEnd));
+  yield* holdToClipEnd(params.durationInSeconds);
 });

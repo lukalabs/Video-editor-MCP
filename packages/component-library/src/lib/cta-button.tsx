@@ -27,7 +27,7 @@
  */
 import { Node, Rect, Txt } from "@motion-canvas/2d";
 import type { View2D } from "@motion-canvas/2d";
-import { waitFor } from "@motion-canvas/core";
+import { usePlayback, useThread, waitFor } from "@motion-canvas/core";
 import type { ThreadGenerator } from "@motion-canvas/core";
 
 import { FONT_FAMILY, FONT_URL } from "./chat-font";
@@ -220,22 +220,58 @@ export function buildCtaShell(view: View2D, layout: CtaLayout, options: CtaShell
  * `minCycleSeconds` is the shortest a cycle may become (its fixed parts - a tick, a sweep -
  * must still fit); fewer, longer cycles are used rather than going below it. Each cycle
  * receives its actual length.
+ *
+ * The cycles fill `seconds - FIT_SLACK`, not `seconds`: see FIT_SLACK.
  */
+/**
+ * Fitted idle time is filled a hair short of the clip end, never exactly to it.
+ *
+ * Motion Canvas keeps a thread's time as the exact sum of the durations it was asked for,
+ * and a scene ends on the first frame at or past that sum. Fitted cycles add up to the
+ * clip length only in floating point - three 1.1667s pulses sum to 3.5000000000000004 -
+ * and landing that hair past a frame boundary adds a whole extra frame: every 4s button
+ * rendered 122 frames (4.033s) instead of 121. Landing short never costs a frame, as long
+ * as it is short by less than one, so the fit aims 0.1ms early - far above float noise,
+ * far below a 33ms frame.
+ */
+export const FIT_SLACK = 1e-4;
+
 export function* repeatFor(
   seconds: number,
   cycleSeconds: number,
   cycle: (length: number) => ThreadGenerator,
   minCycleSeconds = 0,
 ): ThreadGenerator {
-  let cycles = Math.round(seconds / cycleSeconds);
-  while (cycles > 0 && seconds / cycles < minCycleSeconds) cycles -= 1;
+  const usable = Math.max(0, seconds - FIT_SLACK);
+  let cycles = Math.round(usable / cycleSeconds);
+  while (cycles > 0 && usable / cycles < minCycleSeconds) cycles -= 1;
   if (cycles === 0) {
-    yield* waitFor(Math.max(0, seconds));
+    yield* waitFor(usable);
     return;
   }
-  const length = seconds / cycles;
+  const length = usable / cycles;
   for (let i = 0; i < cycles; i += 1) {
     yield* cycle(length);
+  }
+}
+
+/**
+ * Holds the scene until its frame clock reaches the clip end - the last line of every scene.
+ *
+ * FIT_SLACK alone was not enough. Motion Canvas's `waitFor` deliberately finishes one frame
+ * early, comparing against a frame clock that is itself a running float sum, so a scene
+ * whose idle ends on a wait got its last frame only when float noise happened to tip the
+ * comparison: exact-length waits gave 121 frames for 4s by luck, and the 0.1ms slack
+ * flipped shimmer, blink-flash and fill-sweep to 120. Scenes ending on a tween were
+ * unaffected. So instead of relying on how the last call rounds, every scene ends by
+ * advancing frame by frame until the clock is within half a frame of the requested length:
+ * the slack guarantees the idle never runs past the end, and this lands the end exactly.
+ */
+export function* holdToClipEnd(durationInSeconds: number): ThreadGenerator {
+  const thread = useThread();
+  const step = usePlayback().framesToSeconds(1);
+  while (thread.fixed < durationInSeconds - step / 2) {
+    yield;
   }
 }
 

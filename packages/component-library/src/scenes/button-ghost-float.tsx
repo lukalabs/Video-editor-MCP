@@ -3,6 +3,7 @@ import { Color, all, createSignal, easeInOutSine, easeOutCubic, useScene } from 
 
 import {
   buildCtaShell,
+  holdToClipEnd,
   idleSeconds,
   layoutCta,
   loadCtaFont,
@@ -53,4 +54,5 @@ export default makeScene2D(function* (view) {
     yield* all(root.y(restY - floatAmount, half, easeInOutSine), breath(1, half, easeInOutSine));
     yield* all(root.y(restY, half, easeInOutSine), breath(0, half, easeInOutSine));
   });
+  yield* holdToClipEnd(params.durationInSeconds);
 });

@@ -3,6 +3,7 @@ import { all, easeInOutCubic, easeInOutSine, easeOutCubic, useScene } from "@mot
 
 import {
   buildCtaShell,
+  holdToClipEnd,
   idleSeconds,
   layoutCta,
   loadCtaFont,
@@ -49,4 +50,5 @@ export default makeScene2D(function* (view) {
     yield* body.opacity(0.45, length / 2, easeInOutSine);
     yield* body.opacity(1, length / 2, easeInOutSine);
   });
+  yield* holdToClipEnd(params.durationInSeconds);
 });

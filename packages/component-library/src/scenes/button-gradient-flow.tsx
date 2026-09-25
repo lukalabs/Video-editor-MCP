@@ -3,6 +3,7 @@ import { all, createSignal, easeOutCubic, linear, useScene } from "@motion-canva
 
 import {
   buildCtaShell,
+  holdToClipEnd,
   layoutCta,
   loadCtaFont,
   readColor,
@@ -68,4 +69,5 @@ export default makeScene2D(function* (view) {
     root.scale(1, ENTRANCE, easeOutCubic),
     root.opacity(1, ENTRANCE, easeOutCubic),
   );
+  yield* holdToClipEnd(params.durationInSeconds);
 });

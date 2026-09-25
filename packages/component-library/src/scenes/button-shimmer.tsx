@@ -3,6 +3,7 @@ import { Color, all, easeInOutSine, easeOutCubic, linear, useScene, waitFor } fr
 
 import {
   buildCtaShell,
+  holdToClipEnd,
   idleSeconds,
   layoutCta,
   loadCtaFont,
@@ -73,4 +74,5 @@ export default makeScene2D(function* (view) {
     sheen.x(-travel);
     yield* waitFor(length - sweep);
   });
+  yield* holdToClipEnd(params.durationInSeconds);
 });

@@ -3,6 +3,7 @@ import { all, createSignal, easeInOutSine, easeOutBack, useScene } from "@motion
 
 import {
   buildCtaShell,
+  holdToClipEnd,
   idleSeconds,
   layoutCta,
   loadCtaFont,
@@ -50,4 +51,5 @@ export default makeScene2D(function* (view) {
     yield* all(root.scale(1.05, half, easeInOutSine), glow(1, half, easeInOutSine));
     yield* all(root.scale(1, half, easeInOutSine), glow(0, half, easeInOutSine));
   });
+  yield* holdToClipEnd(params.durationInSeconds);
 });
