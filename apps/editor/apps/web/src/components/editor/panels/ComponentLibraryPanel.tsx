@@ -1,10 +1,16 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 
 import { saveMediaBlob } from "../../../services/media-storage";
-import { uploadMedia } from "../../../services/server-storage";
+import {
+  DEFAULT_PROJECT_FOLDER,
+  listComponentFolders,
+  setComponentFolder,
+  uploadMedia,
+} from "../../../services/server-storage";
 import { useProjectStore } from "../../../stores/project-store";
 import { useUIStore } from "../../../stores/ui-store";
 import { toast } from "../../../stores/notification-store";
+import { FolderPicker } from "./FolderPicker";
 import {
   COMPONENT_LIBRARY_SOURCE,
   getComponentMetadata,
@@ -99,6 +105,8 @@ interface ComponentMeta {
   id: string;
   name: string;
   description?: string;
+  /** Catalogue folder; the service reports DEFAULT_PROJECT_FOLDER when there is none. */
+  folder?: string;
   durationParam?: string;
   params: ComponentParam[];
 }
@@ -130,6 +138,13 @@ export const ComponentLibraryPanel: React.FC = () => {
   const [phase, setPhase] = useState<"idle" | "queued" | "rendering" | "importing">("idle");
   const [progress, setProgress] = useState(0);
   const [lastError, setLastError] = useState<string | null>(null);
+  /** Folder names as the server reports them - what the Move picker offers. */
+  const [componentFolders, setComponentFolders] = useState<string[]>([]);
+  /** "" shows every folder. Filtering is client-side: the catalogue is already loaded. */
+  const [folderFilter, setFolderFilter] = useState("");
+  /** The Move control for the selected component: open or not, and what is typed. */
+  const [moving, setMoving] = useState(false);
+  const [moveValue, setMoveValue] = useState("");
 
   const selected = useMemo(
     () => components?.find((component) => component.id === selectedId) ?? null,
@@ -171,6 +186,10 @@ export const ComponentLibraryPanel: React.FC = () => {
       if (!response.ok) throw new Error(`render-service returned ${response.status}`);
       const body = (await response.json()) as { components: ComponentMeta[] };
       setComponents(body.components);
+      // The picker offers the server's folder list; a failure here only costs suggestions.
+      listComponentFolders()
+        .then(setComponentFolders)
+        .catch(() => setComponentFolders([]));
     } catch (error) {
       setComponents(null);
       setCatalogueError(
@@ -183,10 +202,49 @@ export const ComponentLibraryPanel: React.FC = () => {
     void loadCatalogue();
   }, [loadCatalogue]);
 
+  /**
+   * The catalogue bucketed by folder, alphabetical, with the default folder last so real
+   * folders read first - the same order the Projects panel uses.
+   */
+  const folderGroups = useMemo(() => {
+    const buckets = new Map<string, ComponentMeta[]>();
+    for (const component of components ?? []) {
+      const key = component.folder || DEFAULT_PROJECT_FOLDER;
+      buckets.set(key, [...(buckets.get(key) ?? []), component]);
+    }
+    return [...buckets.entries()].sort(([a], [b]) => {
+      if (a === DEFAULT_PROJECT_FOLDER) return 1;
+      if (b === DEFAULT_PROJECT_FOLDER) return -1;
+      return a.localeCompare(b);
+    });
+  }, [components]);
+
+  const visibleGroups = folderFilter
+    ? folderGroups.filter(([folder]) => folder === folderFilter)
+    : folderGroups;
+
+  /** Re-files the selected component, then reloads so the grouping reflects it. */
+  const moveSelected = useCallback(async () => {
+    if (!selected) return;
+    try {
+      const moved = await setComponentFolder(selected.id, moveValue.trim());
+      setMoving(false);
+      setMoveValue("");
+      toast.success(`Moved to ${moved.folder}`, selected.name);
+      await loadCatalogue();
+    } catch (error) {
+      toast.error(
+        "Could not move component",
+        error instanceof Error ? error.message : "Unknown error",
+      );
+    }
+  }, [loadCatalogue, moveValue, selected]);
+
   const selectComponent = useCallback((meta: ComponentMeta) => {
     setSelectedId(meta.id);
     setValues(defaultsFor(meta));
     setLastError(null);
+    setMoving(false);
   }, []);
 
   const setValue = useCallback((key: string, value: PropValue) => {
@@ -436,34 +494,108 @@ export const ComponentLibraryPanel: React.FC = () => {
         </div>
       )}
 
-      <div className="grid grid-cols-2 gap-3">
-        {components.map((component) => {
-          const isActive = component.id === selectedId;
-          return (
-            <button
-              key={component.id}
-              type="button"
-              aria-label={`Select component ${component.name}`}
-              aria-pressed={isActive}
-              onClick={() => selectComponent(component)}
-              className={`rounded-lg border p-3 text-left transition-colors ${
-                isActive ? "border-accent bg-selected" : "border-border/70 bg-bg-2"
-              }`}
-            >
-              <span className="block text-[13px] font-semibold text-fg">{component.name}</span>
-              {component.description && (
-                <span className="mt-1 block text-[11px] leading-snug text-fg-muted">
-                  {component.description}
-                </span>
-              )}
-            </button>
-          );
-        })}
+      <div className="mb-3 flex items-center gap-2">
+        <label htmlFor="component-folder-filter" className="text-[11px] font-medium text-fg-muted">
+          Folder
+        </label>
+        <select
+          id="component-folder-filter"
+          aria-label="Filter components by folder"
+          value={folderFilter}
+          onChange={(event) => setFolderFilter(event.target.value)}
+          className="flex-1 rounded-md border border-border/70 bg-bg-2 px-2 py-1 text-[12px] text-fg"
+        >
+          <option value="">All folders ({components.length})</option>
+          {folderGroups.map(([folder, members]) => (
+            <option key={folder} value={folder}>
+              {folder} ({members.length})
+            </option>
+          ))}
+        </select>
       </div>
+
+      {visibleGroups.map(([folder, members]) => (
+        <section key={folder} aria-label={`Component folder ${folder}`} className="mb-4">
+          <h3 className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-fg-muted">
+            {folder} ({members.length})
+          </h3>
+          <div className="grid grid-cols-2 gap-3">
+            {members.map((component) => {
+              const isActive = component.id === selectedId;
+              return (
+                <button
+                  key={component.id}
+                  type="button"
+                  aria-label={`Select component ${component.name}`}
+                  aria-pressed={isActive}
+                  onClick={() => selectComponent(component)}
+                  className={`rounded-lg border p-3 text-left transition-colors ${
+                    isActive ? "border-accent bg-selected" : "border-border/70 bg-bg-2"
+                  }`}
+                >
+                  <span className="block text-[13px] font-semibold text-fg">{component.name}</span>
+                  {component.description && (
+                    <span className="mt-1 block text-[11px] leading-snug text-fg-muted">
+                      {component.description}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        </section>
+      ))}
 
       {selected && (
         <div className="mt-4 border-t border-border/70 pt-4">
-          <div className="mb-3 text-[13px] font-semibold text-fg">{selected.name}</div>
+          <div className="mb-1 text-[13px] font-semibold text-fg">{selected.name}</div>
+          <div className="mb-3">
+            {moving ? (
+              <div className="flex items-end gap-2">
+                <div className="flex-1">
+                  <FolderPicker
+                    id="component-move-folder"
+                    label="Move to folder"
+                    ariaLabel={`Move ${selected.name} to folder`}
+                    value={moveValue}
+                    onChange={setMoveValue}
+                    options={componentFolders}
+                  />
+                </div>
+                <button
+                  type="button"
+                  onClick={() => void moveSelected()}
+                  className="rounded-md bg-accent px-2 py-1 text-[12px] font-semibold text-bg"
+                >
+                  Move
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setMoving(false)}
+                  className="rounded-md border border-border/70 px-2 py-1 text-[12px] text-fg-muted"
+                >
+                  Cancel
+                </button>
+              </div>
+            ) : (
+              <p className="text-[11px] text-fg-muted">
+                Folder: {selected.folder || DEFAULT_PROJECT_FOLDER} ·{" "}
+                <button
+                  type="button"
+                  aria-label={`Move ${selected.name} to another folder`}
+                  onClick={() => {
+                    setMoveValue(
+                      selected.folder && selected.folder !== DEFAULT_PROJECT_FOLDER ? selected.folder : "",
+                    );
+                    setMoving(true);
+                  }}
+                  className="underline decoration-dotted hover:text-fg"
+                >
+                  Move
+                </button>
+              </p>
+            )}
+          </div>
 
           <div className="flex flex-col gap-3">
             {selected.params.map((param) => {

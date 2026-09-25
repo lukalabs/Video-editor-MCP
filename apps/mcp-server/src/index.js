@@ -210,13 +210,26 @@ server.registerTool(
       "lines in one delimited string (a chat thread's messages, a headline's phrases); the " +
       "param's own description states the delimiter, and its `lineSeparator` gives the same " +
       "answer as data. Call this before generate_component so you know which ids and props " +
-      "exist — the catalogue is read fresh from disk, so do not rely on a remembered list.",
-    inputSchema: {},
+      "exist — the catalogue is read fresh from disk, so do not rely on a remembered list. " +
+      "Components are organised into folders (e.g. Buttons, Chat, Text, Backgrounds); each " +
+      `carries a \`folder\`, "${DEFAULT_PROJECT_FOLDER}" when it has none. Pass folder to list ` +
+      "only one folder, e.g. every button style at once.",
+    inputSchema: {
+      folder: z
+        .string()
+        .optional()
+        .describe(
+          "Only list components in this folder. Omit for the whole catalogue. " +
+            `"${DEFAULT_PROJECT_FOLDER}" lists the ones that have not been filed.`,
+        ),
+    },
   },
-  async () => {
+  async ({ folder }) => {
     try {
-      const { components } = await service.listComponents();
-      return ok(`${components.length} components available.`, components);
+      const { components } = await service.listComponents(folder);
+      const where = folder ? ` in "${folder}"` : "";
+      const noun = components.length === 1 ? "component" : "components";
+      return ok(`${components.length} ${noun} available${where}.`, components);
     } catch (error) {
       return fail(error);
     }

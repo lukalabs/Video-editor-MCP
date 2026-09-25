@@ -2,6 +2,7 @@
   "id": "button-gradient-flow",
   "name": "Button Gradient Flow",
   "description": "Pill with flowing colour gradient",
+  "folder": "Buttons",
   "project": "src/projects/button-gradient-flow.ts",
   "durationParam": "durationInSeconds",
   "defaultWidth": 1080,

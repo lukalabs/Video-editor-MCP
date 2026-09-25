@@ -2,6 +2,7 @@
   "id": "orbit-headline-Rep",
   "name": "Orbit Headline Rep",
   "description": "Headline words scale in on arcs",
+  "folder": "Text",
   "project": "src/projects/orbit-headline-Rep.ts",
   "durationParam": "durationInSeconds",
   "params": [

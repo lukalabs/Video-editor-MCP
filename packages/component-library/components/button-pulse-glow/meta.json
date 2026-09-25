@@ -2,6 +2,7 @@
   "id": "button-pulse-glow",
   "name": "Button Pulse Glow",
   "description": "Pill button with pulsing glow",
+  "folder": "Buttons",
   "project": "src/projects/button-pulse-glow.ts",
   "durationParam": "durationInSeconds",
   "defaultWidth": 1080,

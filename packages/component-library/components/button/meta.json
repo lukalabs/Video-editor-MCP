@@ -2,6 +2,7 @@
   "id": "button",
   "name": "Button",
   "description": "A UI button rendered on transparency. Size, colour, radius, filled or outlined and the entrance animation are all parameters, so one component covers the whole button set.",
+  "folder": "Buttons",
   "project": "src/projects/button.ts",
   "durationParam": "durationInSeconds",
   "defaultWidth": 1920,

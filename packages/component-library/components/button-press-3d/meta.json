@@ -2,6 +2,7 @@
   "id": "button-press-3d",
   "name": "Button Press 3D",
   "description": "Chunky 3D button that clicks",
+  "folder": "Buttons",
   "project": "src/projects/button-press-3d.ts",
   "durationParam": "durationInSeconds",
   "defaultWidth": 1080,

@@ -4205,3 +4205,58 @@ a frame of the requested length - so the end no longer depends on how the last c
 Verified on all ten at 2.5s, 4s and 7.3s: 76, 121 and 220 frames, 30 of 30 exact; the full
 sizing and motion suite passes again. Clips rendered before this fix keep their extra frame
 until re-rendered.
+
+## Stage 35 — component folders
+
+The Component Library is now organised into folders. A component's folder lives in its own
+tracked `meta.json` (`"folder": "Buttons"`), not in the database: the catalogue is already read
+fresh from those files on every request, so a folder travels with the component, shows up in
+review as a one-line diff, and needs no migration. Seeded as Buttons (the eleven CTA buttons),
+Chat, Text (orbit headline, stat counter) and Backgrounds. As with projects, no folder means
+"Uncategorized", which is reported but never written, and shown last.
+
+- `GET /components` now gives every component a `folder` and takes `?folder=`, matched against
+  the reported folder so `?folder=Uncategorized` finds the unfiled ones.
+- `GET /components/folders` lists the folders in use.
+- `PATCH /components/:id/folder` with `{folder}` re-files. `""` or "Uncategorized" clears it.
+- Editor: the panel groups by folder, has a folder filter, and the selected component shows
+  "Folder: X · Move", which opens the same FolderPicker the Projects panel uses.
+- MCP: `list_components` takes an optional `folder`. There is deliberately no tool that
+  re-files: curating folders is for people, matching how project folders work.
+
+A re-file must be exactly one line so diffs stay honest. `placeFolder` puts the field right after
+`description`, and a write happens only when the text changes. Clearing restores the original
+bytes. That depends on every meta.json already being in `JSON.stringify(_, null, 2)` form;
+stat-counter's was hand-formatted, so it was normalised once, in its own commit with no
+content change. A test now guards canonical form for every file.
+
+Writes go to a temp file that is then renamed over the target, so a reader never sees half a
+file. Two things turned up under a 20-concurrent-re-file stress test with a reader running
+alongside:
+- Windows rejects a rename over a file someone is reading (EPERM/EBUSY/EACCES), briefly. A
+  fixed six retries still failed in one of eight runs. It now retries for up to 10s, the same
+  approach graceful-fs takes (it allows 60s). Result: 0 failures in 500 writes against 13,180
+  concurrent reads.
+- Last write did not always win: requests awaited a lookup before joining the per-component
+  queue, so they could jump ahead of each other ("Folder 14" won over "Folder 19"). They now
+  join the queue the moment they arrive and validate inside it.
+
+The PATCH routes passed their tests but would have failed in the browser: the render service's
+CORS allow-methods didn't list PATCH, and injected tests skip preflight. It is listed now.
+
+Verified live against the restarted service:
+- **HTTP route:** a re-file changed one line and a clear was byte-identical to HEAD; re-filing
+  back was byte-identical to the seeded file, with no temp files left. The folder list read
+  Backgrounds/Buttons/Chat/Text, and the filters returned 11/2/2/1. Unfiling stat-counter
+  made it show under Uncategorized.
+- **Editor, with real clicks and typing:** Chat Thread Rep went to "UI Check". The browser
+  sent OPTIONS 204 then PATCH 200, the file gained one line, and the new group survived a page
+  reload. Moving it back to Chat left the file byte-identical to its seeded version.
+- **MCP:** checked on a freshly started stdio server, because the session's own server predates
+  the change. `folder` is advertised and filters give 11/2/2/1; unknown or empty folders give 0,
+  and no re-file tool is exposed.
+- **Rendering and suites:** re-filed components still render (button-shimmer, 91 frames for
+  3s). Suites: render-service 76, project-kit 53, mcp-server 24, web 903, core 1340, all
+  passing.
+
+Unrelated and not investigated: stat-counter renders 96 frames for a 3s request.

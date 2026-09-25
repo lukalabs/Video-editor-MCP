@@ -265,6 +265,38 @@ export async function restoreProjectVersion(
   return asJson(response, "Restoring the version");
 }
 
+/* ------------------------------------------------------ component folders */
+
+/**
+ * The folder names the component catalogue uses, from `GET /components/folders`. A
+ * component with no folder is reported under DEFAULT_PROJECT_FOLDER, the same default
+ * projects use.
+ */
+export async function listComponentFolders(): Promise<string[]> {
+  const response = await fetch(`${BASE}/components/folders`);
+  const body = await asJson<{ folders: string[] }>(response, "Listing component folders");
+  return body.folders;
+}
+
+/**
+ * Re-files a component. The folder is a field in its tracked meta.json, so this changes one
+ * line of a file in the repository. An empty string moves it back to the default folder.
+ */
+export async function setComponentFolder(
+  componentId: string,
+  folder: string,
+): Promise<{ id: string; folder: string }> {
+  const response = await fetch(
+    `${BASE}/components/${encodeURIComponent(componentId)}/folder`,
+    {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ folder }),
+    },
+  );
+  return asJson(response, "Moving component to a folder");
+}
+
 /* ----------------------------------------------------------- saved masks */
 
 /**

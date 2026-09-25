@@ -2,6 +2,7 @@
   "id": "button-shimmer",
   "name": "Button Shimmer",
   "description": "Rounded button with light sheen",
+  "folder": "Buttons",
   "project": "src/projects/button-shimmer.ts",
   "durationParam": "durationInSeconds",
   "defaultWidth": 1080,

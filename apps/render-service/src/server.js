@@ -5,9 +5,10 @@ import process from "node:process";
 
 import Fastify from "fastify";
 
-import { getComponent, listComponents, resolveDuration, validateProps } from "./components.js";
+import { getComponent, resolveDuration, validateProps } from "./components.js";
 import { config } from "./config.js";
 import { createQueue, toApiStatus } from "./queue.js";
+import { registerComponentRoutes } from "./routes-components.js";
 import { registerMaskRoutes } from "./routes-masks.js";
 import { registerOpsRoutes } from "./routes-ops.js";
 import { parseByteRange, registerStorageRoutes } from "./routes-storage.js";
@@ -29,7 +30,9 @@ app.addHook("onRequest", async (request, reply) => {
     "access-control-allow-headers",
     "content-type,x-filename,x-media-id,x-mime-type",
   );
-  reply.header("access-control-allow-methods", "GET,POST,PUT,DELETE,OPTIONS");
+  // PATCH for re-filing a component; leaving it out fails the browser's preflight while
+  // every server-side test still passes.
+  reply.header("access-control-allow-methods", "GET,POST,PUT,PATCH,DELETE,OPTIONS");
   if (request.method === "OPTIONS") {
     reply.code(204).send();
   }
@@ -65,8 +68,7 @@ app.get("/health", async (_request, reply) => {
   return body;
 });
 
-/** The catalogue the Component Library panel will render (Stage 4). */
-app.get("/components", async () => ({ components: await listComponents() }));
+// The catalogue (GET /components) and its folders live in routes-components.js.
 
 app.post("/render", async (request, reply) => {
   const { componentId, props: rawProps, fps, width, height, background } = request.body ?? {};
@@ -198,6 +200,7 @@ async function main() {
   await registerStorageRoutes(app);
   await registerOpsRoutes(app);
   await registerMaskRoutes(app);
+  await registerComponentRoutes(app);
   await app.listen({ host: config.host, port: config.port });
   app.log.info(
     `render-service on http://${config.host}:${config.port} — storage ${config.storageDir}`,

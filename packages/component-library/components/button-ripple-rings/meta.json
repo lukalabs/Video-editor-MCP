@@ -2,6 +2,7 @@
   "id": "button-ripple-rings",
   "name": "Button Ripple Rings",
   "description": "Button with rippling tap rings",
+  "folder": "Buttons",
   "project": "src/projects/button-ripple-rings.ts",
   "durationParam": "durationInSeconds",
   "defaultWidth": 1080,

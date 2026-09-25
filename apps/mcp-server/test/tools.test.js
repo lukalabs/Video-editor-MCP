@@ -232,3 +232,11 @@ test("the saved-mask tools explain copy-on-apply and how to apply by name", () =
   assert.match(save.description, /never affects clips/);
   assert.match(list.description, /set_clip_mask \{ savedMaskName \}/);
 });
+
+test("list_components can filter by folder, and says so", () => {
+  const tool = tools.find((item) => item.name === "list_components");
+  assert.ok(tool.inputSchema?.properties?.folder, "list_components should accept folder");
+  assert.ok(!(tool.inputSchema.required ?? []).includes("folder"), "folder must stay optional");
+  assert.match(tool.description, /folders/);
+  assert.match(tool.description, /Uncategorized/);
+});

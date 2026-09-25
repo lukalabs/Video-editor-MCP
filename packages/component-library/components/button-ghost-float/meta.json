@@ -2,6 +2,7 @@
   "id": "button-ghost-float",
   "name": "Button Ghost Float",
   "description": "Translucent pill that gently floats",
+  "folder": "Buttons",
   "project": "src/projects/button-ghost-float.ts",
   "durationParam": "durationInSeconds",
   "defaultWidth": 1080,

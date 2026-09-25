@@ -2,6 +2,7 @@
   "id": "button-outline-draw",
   "name": "Button Outline Draw",
   "description": "Square outline that draws itself",
+  "folder": "Buttons",
   "project": "src/projects/button-outline-draw.ts",
   "durationParam": "durationInSeconds",
   "defaultWidth": 1080,

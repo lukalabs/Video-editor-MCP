@@ -2,6 +2,7 @@
   "id": "chat-thread-Rep",
   "name": "Chat Thread Rep",
   "description": "Replika conversation with typing dots",
+  "folder": "Chat",
   "project": "src/projects/chat-thread-Rep.ts",
   "durationParam": "durationInSeconds",
   "defaultWidth": 1080,

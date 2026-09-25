@@ -2,6 +2,7 @@
   "id": "turbulent-background-Rep",
   "name": "Turbulent Background Rep",
   "description": "Looping turbulent brand gradient background",
+  "folder": "Backgrounds",
   "project": "src/projects/turbulent-background-Rep.ts",
   "durationParam": "durationInSeconds",
   "defaultWidth": 1080,

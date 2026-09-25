@@ -3,7 +3,8 @@ import React from "react";
 import { DEFAULT_PROJECT_FOLDER } from "../../../services/server-storage";
 
 /**
- * Pick an existing project folder, or type a new one.
+ * Pick an existing folder, or type a new one. Used for projects and for the component
+ * catalogue, which share the same folder vocabulary and default name.
  *
  * One control rather than two: a text input backed by a `<datalist>`, which is a native
  * combobox — the dropdown offers what already exists and anything typed is accepted as a new
@@ -11,8 +12,9 @@ import { DEFAULT_PROJECT_FOLDER } from "../../../services/server-storage";
  * an existing folder) and the uncommon one (invent one) look equally heavy, and would need a
  * mode switch between them.
  *
- * `options` come from `GET /projects/folders`, i.e. the server's own list, not folders
- * derived from whichever projects happen to be loaded — see ServerProjectsPanel.
+ * `options` come from the server's own list (`GET /projects/folders` or
+ * `GET /components/folders`), not folders derived from whatever happens to be loaded — see
+ * ServerProjectsPanel.
  */
 export interface FolderPickerProps {
   id: string;

@@ -2,6 +2,7 @@
   "id": "button-blink-flash",
   "name": "Button Blink Flash",
   "description": "Square button flashing two colours",
+  "folder": "Buttons",
   "project": "src/projects/button-blink-flash.ts",
   "durationParam": "durationInSeconds",
   "defaultWidth": 1080,

@@ -2,6 +2,7 @@
   "id": "stat-counter",
   "name": "Stat Counter",
   "description": "Animated count-up number with label",
+  "folder": "Text",
   "project": "src/projects/stat-counter.ts",
   "durationParam": "durationInSeconds",
   "params": [

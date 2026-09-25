@@ -2,6 +2,7 @@
   "id": "button-fill-sweep",
   "name": "Button Fill Sweep",
   "description": "Outline button that fills in",
+  "folder": "Buttons",
   "project": "src/projects/button-fill-sweep.ts",
   "durationParam": "durationInSeconds",
   "defaultWidth": 1080,
