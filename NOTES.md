@@ -6,12 +6,17 @@ Engineering notes for the browser video editor prototype.
 
 Standing rules that apply to future work, kept here so they survive between sessions.
 
-- **Custom components carry a `-Rep` suffix on both the id and the display name.** Every
-  component we build from now on is named `<thing>-Rep` with a display name ending in
-  " Rep" — e.g. id `orbit-headline-Rep`, name "Orbit Headline Rep". Applied retroactively to
-  the two Stage 13/14 components in Stage 15. `stat-counter` keeps its original id: it is the
-  only pre-`-Rep` component still in the library after Stage 16, and renaming it would break
-  the projects and component_metadata rows that reference it.
+- **The `-Rep` suffix marks BRANDED components, not everything we build.** A component tied
+  to brand identity is named `<thing>-Rep` with a display name ending in " Rep": the test is
+  whether it carries brand-specific content - `orbit-headline-Rep`'s exact After Effects-ported
+  animation, the chat bubbles' Replika balloon geometry and colours, `turbulent-background-Rep`'s
+  brand colour palettes. Generic, reusable components with nothing brand-specific in them take
+  no suffix - the ten CTA buttons (`button-pulse-glow` and siblings), which their own brief
+  called "not necessarily branded, simple, generic". This narrows the original Stage 15 rule
+  ("every component we build is `-Rep`"), and Stage 33 renamed the buttons to match.
+  `stat-counter` keeps its original unsuffixed id: renaming it would break the projects and
+  component_metadata rows that reference it. Renaming a component touches nine places - see
+  Stage 15 for the list and Stage 33 for the live-data step it omits.
 - **A component's `meta.json` `description` is one short sentence, about five words.** It is
   a label, not documentation — "Replika conversation with typing dots", not a paragraph on
   timing and fonts. It is the line the Component Library panel puts under the name and the
@@ -4083,21 +4088,23 @@ sampled points correct in preview and 28/28 in export.
 
 ## Stage 32 — CTA button set
 
-Ten separately named buttons, `button-<style>-Rep`, original Motion Canvas work. The older
+Ten separately named buttons, `button-<style>`, original Motion Canvas work. (Built as
+`button-<style>-Rep`; the suffix was dropped in Stage 33, because these are generic, not
+branded. The ids below are the current ones.) The older
 parameterised `button` component is untouched: the orchestrator's `button` step uses it.
 
 | id | corners · fill | motion |
 |---|---|---|
-| `button-pulse-glow-Rep` | pill · solid | pops in; swells with a blooming glow |
-| `button-shimmer-Rep` | rounded · solid | slides up; clipped diagonal sheen sweeps across |
-| `button-outline-draw-Rep` | sharp · outline | border draws itself, label rises; border breathes |
-| `button-fill-sweep-Rep` | rounded · outline→solid | fill wipes in and the label flips colour where it passes |
-| `button-ghost-float-Rep` | pill · ghost | rises in; drifts up and down, fill breathes |
-| `button-press-3d-Rep` | sharp · solid + depth | pops in; clicks down into its depth block |
-| `button-bounce-in-Rep` | pill · solid | elastic scale-in; periodic rotation wiggle |
-| `button-blink-flash-Rep` | sharp · solid | fill hard-cuts between two colours with a scale tick |
-| `button-gradient-flow-Rep` | pill · gradient | two-colour gradient scrolls seamlessly through the fill |
-| `button-ripple-rings-Rep` | rounded · solid | rings in the button's shape expand out and fade |
+| `button-pulse-glow` | pill · solid | pops in; swells with a blooming glow |
+| `button-shimmer` | rounded · solid | slides up; clipped diagonal sheen sweeps across |
+| `button-outline-draw` | sharp · outline | border draws itself, label rises; border breathes |
+| `button-fill-sweep` | rounded · outline→solid | fill wipes in and the label flips colour where it passes |
+| `button-ghost-float` | pill · ghost | rises in; drifts up and down, fill breathes |
+| `button-press-3d` | sharp · solid + depth | pops in; clicks down into its depth block |
+| `button-bounce-in` | pill · solid | elastic scale-in; periodic rotation wiggle |
+| `button-blink-flash` | sharp · solid | fill hard-cuts between two colours with a scale tick |
+| `button-gradient-flow` | pill · gradient | two-colour gradient scrolls seamlessly through the fill |
+| `button-ripple-rings` | rounded · solid | rings in the button's shape expand out and fade |
 
 ### One shell, one measurer
 
@@ -4133,3 +4140,29 @@ whose label shares the border colour (outline-draw, ghost-float, press-3d) were 
 with a magenta label for the containment check: with the default colours, border
 anti-aliasing one pixel outside the edge was indistinguishable from text, and passing there
 would have proved nothing.
+
+## Stage 33 — `-Rep` reserved for branded components; CTA buttons renamed
+
+The suffix now marks brand-identity components only (see the rule at the top). The ten CTA
+buttons carry nothing brand-specific, so they lost it: `button-pulse-glow-Rep` →
+`button-pulse-glow`, and likewise `shimmer`, `outline-draw`, `fill-sweep`, `ghost-float`,
+`press-3d`, `bounce-in`, `blink-flash`, `gradient-flow`, `ripple-rings`. Display names lose
+the trailing " Rep". The four branded components are untouched.
+
+Followed Stage 15's list per component: directory, `meta.json` id / name / project, project and
+scene filenames with their `.meta` sidecars, the `?scene` import, the harness import and
+`PROJECTS` key, the `vite.config.ts` list and comments naming the id. No bundled assets. New
+since Stage 15, and so checked specifically: `cta-button-defaults.ts` is keyed by id, and the
+metas are generated from a spec keyed by id - regenerating from the updated spec reproduced
+the renamed metas byte for byte. The ten old ids joined the MCP tests' retired-id guard, as
+the pre-`-Rep` ids did in Stage 15. No MCP tool description, render-service code or test named
+a button.
+
+**The step Stage 15 did not need: live data.** The buttons had already been used through the
+Component Library panel, so the rename met stored references - 11 `component_metadata` rows
+keyed to the old ids, and one saved project ("Test btns", plus 2 of its versions) whose media
+items are *named* after them (`button-ghost-float-Rep-Get Started.webm`). The names are only
+labels; the rows are what let the panel re-render a clip, and with the old ids now 404ing
+from `POST /render`, those clips cannot be re-rendered until the rows point at the new ids.
+Recorded here because a future rename will meet the same thing: check `component_metadata`
+and saved projects for the old id before calling a rename done.

@@ -11,7 +11,7 @@ out of this repo unchanged.
 | `stat-counter` | `label: text`, `targetNumber: number`, `accentColor: color`, `durationInSeconds: number` |
 | `turbulent-background-Rep` | `backgroundPreset: text`, `image: media`, `scale`/`offsetX`/`offsetY`, `displacementAmount`, `noiseScale`, `durationInSeconds` — renders 9:16 (1080x1920) by default |
 | `orbit-headline-Rep` | `text: text`, `fontFamily: text`, `textColor: color`, `durationInSeconds`, `zoomAmount`, `driftAmount`, `settleAmount`, `staggerSeconds` |
-| `button-<style>-Rep` (ten: `pulse-glow`, `shimmer`, `outline-draw`, `fill-sweep`, `ghost-float`, `press-3d`, `bounce-in`, `blink-flash`, `gradient-flow`, `ripple-rings`) | shared: `text: text`, `backgroundColor: color`, `textColor: color`, `fontSize`, `positionY`, `durationInSeconds`, plus one or two per style (e.g. `glowColor`, `pressInterval`). Each auto-sizes to its measured text via `src/lib/cta-button.tsx`; defaults live in `src/lib/cta-button-defaults.ts` — renders 9:16 (1080x1920) by default |
+| `button-<style>` (ten: `pulse-glow`, `shimmer`, `outline-draw`, `fill-sweep`, `ghost-float`, `press-3d`, `bounce-in`, `blink-flash`, `gradient-flow`, `ripple-rings`) | shared: `text: text`, `backgroundColor: color`, `textColor: color`, `fontSize`, `positionY`, `durationInSeconds`, plus one or two per style (e.g. `glowColor`, `pressInterval`). Each auto-sizes to its measured text via `src/lib/cta-button.tsx`; defaults live in `src/lib/cta-button-defaults.ts` — renders 9:16 (1080x1920) by default |
 
 Custom components carry a `-Rep` suffix on id and display name (see the Conventions section of
 NOTES.md). Five earlier components — `animated-text`, `logo-reveal`, `logo-reveal-v2`,

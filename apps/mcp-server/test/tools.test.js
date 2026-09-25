@@ -38,6 +38,16 @@ const RETIRED_COMPONENT_IDS = [
   "orbit-headline",       // pre -Rep rename
   "turbulent-background", // pre -Rep rename
   "turbulent-bg-new",     // pre -Rep rename
+  "button-pulse-glow-Rep",            // suffix dropped: generic, not branded
+  "button-shimmer-Rep",               // suffix dropped: generic, not branded
+  "button-outline-draw-Rep",          // suffix dropped: generic, not branded
+  "button-fill-sweep-Rep",            // suffix dropped: generic, not branded
+  "button-ghost-float-Rep",           // suffix dropped: generic, not branded
+  "button-press-3d-Rep",              // suffix dropped: generic, not branded
+  "button-bounce-in-Rep",             // suffix dropped: generic, not branded
+  "button-blink-flash-Rep",           // suffix dropped: generic, not branded
+  "button-gradient-flow-Rep",         // suffix dropped: generic, not branded
+  "button-ripple-rings-Rep",          // suffix dropped: generic, not branded
 ];
 
 /** The live catalogue, read the way render-service reads it. */

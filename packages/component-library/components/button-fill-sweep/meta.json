@@ -1,0 +1,82 @@
+{
+  "id": "button-fill-sweep",
+  "name": "Button Fill Sweep",
+  "description": "Outline button that fills in",
+  "project": "src/projects/button-fill-sweep.ts",
+  "durationParam": "durationInSeconds",
+  "defaultWidth": 1080,
+  "defaultHeight": 1920,
+  "params": [
+    {
+      "key": "text",
+      "label": "Button text",
+      "type": "text",
+      "default": "Get Started",
+      "description": "The label. The button sizes itself to it: longer text makes a wider button, very short text keeps a minimum width, and text too wide for the frame wraps onto more lines."
+    },
+    {
+      "key": "backgroundColor",
+      "label": "Button colour",
+      "type": "color",
+      "default": "#f97316",
+      "description": "Border colour at first, then the fill that sweeps in. The label starts in this colour."
+    },
+    {
+      "key": "textColor",
+      "label": "Text colour",
+      "type": "color",
+      "default": "#ffffff",
+      "description": "Label colour once the fill has swept under it."
+    },
+    {
+      "key": "borderWidth",
+      "label": "Border width (px)",
+      "type": "number",
+      "default": 5,
+      "min": 1,
+      "max": 24,
+      "step": 1,
+      "description": "Thickness of the outline before it fills."
+    },
+    {
+      "key": "sweepSeconds",
+      "label": "Sweep time (s)",
+      "type": "number",
+      "default": 0.6,
+      "min": 0.2,
+      "max": 4,
+      "step": 0.1,
+      "description": "How long the fill takes to wipe across, left to right."
+    },
+    {
+      "key": "fontSize",
+      "label": "Font size (px)",
+      "type": "number",
+      "default": 64,
+      "min": 16,
+      "max": 200,
+      "step": 1,
+      "description": "Label size. The button's height follows it, and its width follows the measured text."
+    },
+    {
+      "key": "positionY",
+      "label": "Vertical position (0 top / 1 bottom)",
+      "type": "number",
+      "default": 0.5,
+      "min": 0.05,
+      "max": 0.95,
+      "step": 0.01,
+      "description": "Where the button's centre sits in the frame, 0 at the top edge and 1 at the bottom."
+    },
+    {
+      "key": "durationInSeconds",
+      "label": "Duration (s)",
+      "type": "number",
+      "default": 4,
+      "min": 0.5,
+      "max": 30,
+      "step": 0.5,
+      "description": "Clip length. The button enters, then idles on a loop and stays on screen to the end."
+    }
+  ]
+}

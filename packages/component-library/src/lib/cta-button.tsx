@@ -1,7 +1,7 @@
 /**
  * Shared shell for the CTA button set: text measurement, auto-sizing and the button body.
  *
- * Every `button-*-Rep` scene builds its button here and only adds its own look and motion
+ * Every `button-*` CTA scene builds its button here and only adds its own look and motion
  * on top, so sizing is decided once. The same reason as balloon-bubble.tsx: a button's
  * width is an input to its geometry, not decoration, and ten copies of that arithmetic
  * would drift apart the first time one of them was tuned.

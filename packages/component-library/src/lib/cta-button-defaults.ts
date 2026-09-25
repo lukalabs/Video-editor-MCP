@@ -20,28 +20,28 @@ const SHARED = {
 };
 
 export const CTA_DEFAULTS = {
-  "button-pulse-glow-Rep": {
+  "button-pulse-glow": {
     ...SHARED,
     backgroundColor: "#2563eb",
     textColor: "#ffffff",
     glowColor: "#60a5fa",
     pulseSeconds: 1.2,
   },
-  "button-shimmer-Rep": {
+  "button-shimmer": {
     ...SHARED,
     backgroundColor: "#7c3aed",
     textColor: "#ffffff",
     shimmerColor: "#ffffff",
     shimmerInterval: 1.8,
   },
-  "button-outline-draw-Rep": {
+  "button-outline-draw": {
     ...SHARED,
     backgroundColor: "#f8fafc",
     textColor: "#f8fafc",
     borderWidth: 6,
     drawSeconds: 0.9,
   },
-  "button-fill-sweep-Rep": {
+  "button-fill-sweep": {
     ...SHARED,
     backgroundColor: "#f97316",
     textColor: "#ffffff",
@@ -49,27 +49,27 @@ export const CTA_DEFAULTS = {
     // With the default 4s clip this leaves room for one full wipe-out-and-back while idle.
     sweepSeconds: 0.6,
   },
-  "button-ghost-float-Rep": {
+  "button-ghost-float": {
     ...SHARED,
     backgroundColor: "#ffffff",
     textColor: "#ffffff",
     fillOpacity: 0.18,
     floatAmount: 12,
   },
-  "button-press-3d-Rep": {
+  "button-press-3d": {
     ...SHARED,
     backgroundColor: "#facc15",
     textColor: "#111827",
     shadowColor: "#111827",
     pressInterval: 1.6,
   },
-  "button-bounce-in-Rep": {
+  "button-bounce-in": {
     ...SHARED,
     backgroundColor: "#ec4899",
     textColor: "#ffffff",
     wiggleInterval: 2.2,
   },
-  "button-blink-flash-Rep": {
+  "button-blink-flash": {
     ...SHARED,
     backgroundColor: "#dc2626",
     textColor: "#ffffff",
@@ -77,14 +77,14 @@ export const CTA_DEFAULTS = {
     flashColor: "#ea580c",
     blinkInterval: 0.5,
   },
-  "button-gradient-flow-Rep": {
+  "button-gradient-flow": {
     ...SHARED,
     backgroundColor: "#06b6d4",
     textColor: "#ffffff",
     gradientColor: "#8b5cf6",
     flowSeconds: 2.5,
   },
-  "button-ripple-rings-Rep": {
+  "button-ripple-rings": {
     ...SHARED,
     backgroundColor: "#10b981",
     textColor: "#ffffff",
