@@ -4166,3 +4166,19 @@ labels; the rows are what let the panel re-render a clip, and with the old ids n
 from `POST /render`, those clips cannot be re-rendered until the rows point at the new ids.
 Recorded here because a future rename will meet the same thing: check `component_metadata`
 and saved projects for the old id before calling a rename done.
+
+**Migration, applied.** `apps/render-service/scripts/rename-component-ids.mjs --preset cta-drop-rep`
+(logic in `src/component-rename.js`, tested) moves the old ids in the three places that hold
+one: `component_metadata` rows, `clip.metadata.componentId` on timeline clips in saved projects,
+and the same field inside version snapshots. The clip field is the one that matters: the panel's
+re-render mode reads the clip's own `componentId`, and the editor never re-stamps a clip that
+already has component metadata - so updating the table alone looks like a fix and is not one.
+Media names are left alone; they are labels. Idempotent, one transaction, and it bumps
+`updated_at` on changed projects so a stale open copy conflicts rather than writing old ids back.
+
+Applied here: 10 rows (the 11th counted earlier had been removed by the orphan-media sweep - its
+media was referenced by nothing), 8 clips in "Test btns", 11 clips across its 2 versions. Proven
+in the editor rather than in the database: selecting the shimmer clip put the Component Library
+panel into re-render mode with the clip's own params (custom colour included), and "Re-render
+clip" produced a new render (`119.webm`) under `button-shimmer` and swapped it into the clip.
+Anyone else's database needs the same one command.
