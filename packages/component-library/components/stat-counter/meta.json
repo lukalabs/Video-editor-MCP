@@ -5,7 +5,12 @@
   "project": "src/projects/stat-counter.ts",
   "durationParam": "durationInSeconds",
   "params": [
-    { "key": "label", "label": "Label", "type": "text", "default": "Active users" },
+    {
+      "key": "label",
+      "label": "Label",
+      "type": "text",
+      "default": "Active users"
+    },
     {
       "key": "targetNumber",
       "label": "Target number",
@@ -15,7 +20,12 @@
       "max": 1000000,
       "step": 1
     },
-    { "key": "accentColor", "label": "Accent colour", "type": "color", "default": "#34d399" },
+    {
+      "key": "accentColor",
+      "label": "Accent colour",
+      "type": "color",
+      "default": "#34d399"
+    },
     {
       "key": "durationInSeconds",
       "label": "Duration (s)",
